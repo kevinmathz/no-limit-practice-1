@@ -9,7 +9,7 @@ Written for a Claude agent starting bot work on a **new variant** of the Sequoia
 The build window is short: 60 minutes, then scored rounds every 20 minutes with rising weights. **A good bot uploaded now beats a great bot uploaded late.** A team with no active bot scores 0 for that round.
 
 - **Upload a safe bot in the first 10 minutes:** legal, never crashes, tight. Then improve it.
-- **Timebox every task to 10 minutes or less.** If a task runs over, cut its scope (fewer tables, skip tuning) rather than extend it.
+- **Estimate before you start.** If a task will take 5 minutes or more, tell the user first and give a time estimate. Anything over about 30 minutes is almost certainly out of the question; cut its scope instead (fewer tables, smaller search, skip tuning).
 - **Parallelize.** Use one subagent per bot version, each writing only its own `vN/` folder. Then run one round-robin to decide.
 - **Pick fast methods.**
   - Rules, tightness, ICM and cheap exact checks give big gains in minutes.
@@ -25,7 +25,7 @@ The build window is short: 60 minutes, then scored rounds every 20 minutes with 
 3. **ICM-aware commits and a river "can't win" fold helped a bit.** The river check uses the variant's public information. Bet hard with a lock (a hand no unseen card can beat) and fold when the hand is drawing dead.
 4. **CFR (MCCFR) on a heads-up abstraction lost to simple rules at 8-max.** Its low-probability "noise" actions and its heads-up ranges played multi-way got it busted early: 86% of seats, half of them by hand 6. Pruning actions under 8%, then adding ICM and tightness, made it competitive (v10/v12), but most of that gain came from the tightness, not the CFR.
 5. **Clever theory hurt in a field of passive bots.** MDF-based defending (v6, v7) and hand-tuned schedules by players remaining (v14–v17) did no better or worse in this field. **Measure everything against `check_or_fold` and your current best, and keep only changes that win in simulation.**
-6. **Process.** Build the safe template and the harness first, then tighten, add ICM, then add variant-specific edges. Run each check in under 10 minutes. Use a fixed seed with 2,000+ tables per comparison; noise is about ±0.3–0.5 points.
+6. **Process.** Build the safe template and the harness first, then tighten, add ICM, then add variant-specific edges. Ask the user before any step that takes 5 minutes or more. Use a fixed seed with 2,000+ tables per comparison; noise is about ±0.3–0.5 points.
 
 ---
 
@@ -183,7 +183,7 @@ Use the same pattern for any constant: thresholds, ICM margins, the aggression w
 
 ## 8. Workflow tips for a time-boxed event
 
-- **Timebox every task to 10 minutes or less.** Run independent builds in parallel subagents, each creating only its own `vN/` folder, then compare everything in one round-robin.
+- **Estimate every task.** Tell the user before anything that takes 5 minutes or more, and never plan more than about 30 minutes. Run independent builds in parallel subagents, each creating only its own `vN/` folder, then compare everything in one round-robin.
 - **Always compare** with a fixed seed and 2,000–4,000 tables, against `check_or_fold` plus your current best. Report points, 1st %, out-of-money (4th–8th) % and failed decisions.
 - **Gate changes:** check passes, 0 failed decisions, p99 well under 1 ms. Ship only a version that beats the current best in the round-robin.
 - **Commit after each milestone.** Upload early (one upload per 30 s). Every scored round snapshots the active bot when it starts, and a missing bot scores 0.
