@@ -20,20 +20,22 @@ The build window is short: 60 minutes, then scored rounds every 20 minutes with 
 
 ## Top 8 bots (latest)
 
-From a 1,000-table match (seed 151) with all 8 at one table. The 3,000-table rerun is in §11. "Out" means finishing 4th–8th.
+From a 3,000-table match (seed 161) with all 8 at one table. "Out" means finishing 4th–8th.
 
-| Rank | Bot | Lineage | Avg points | 1st | Out | p99 ms |
-|---|---|---|---|---|---|---|
-| 1 | **v19** | v13 + learned players-remaining schedule | **16.98** | 26.5% | 57.9% | 0.18 |
-| 2 | v18 | v12 + learned schedule | 13.97 | 7.7% | 54.7% | 0.08 |
-| 3 | v13 | rule line: tight + ICM + lock | 13.35 | 22.1% | 67.3% | 0.17 |
-| 4 | v10 | CFR line: tight + ICM | 12.55 | 8.3% | 60.4% | 0.07 |
-| 5 | v15 | v13 + smooth hand-picked schedule | 12.42 | 19.4% | 69.7% | 0.18 |
-| 6 | v12 | v10 tighter + lock | 12.38 | 7.8% | 59.2% | 0.08 |
-| 7 | v17 | v10 + smooth hand-picked schedule | 12.13 | 8.2% | 60.3% | 0.08 |
-| 8 | check_or_fold | baseline | 6.23 | 0% | 70.5% | 0.00 |
+| Rank | Bot | Lineage | Avg points | 1st | 2nd | 3rd | Out | p99 ms |
+|---|---|---|---|---|---|---|---|---|
+| 1 | **v19** | v13 + learned players-remaining schedule | **16.4** | 26% | 9% | 6% | 59% | 0.17 |
+| 2 | v13 | rule line: v0 + ICM + river fold + tight + lock | 14.7 | 24% | 8% | 4% | 64% | 0.16 |
+| 3 | v18 | v12 + learned schedule | 13.6 | 8% | 20% | 16% | 55% | 0.07 |
+| 4 | v10 | CFR line: v1 + ICM + river fold + prune + tight | 13.2 | 8% | 19% | 16% | 57% | 0.07 |
+| 5 | v12 | v10 tighter + top-of-range + lock | 12.6 | 8% | 17% | 17% | 58% | 0.07 |
+| 6 | v20 | v10 + learned schedule (only 3 search generations) | 12.4 | 8% | 18% | 14% | 60% | 0.07 |
+| 7 | v15 | v13 + smooth hand-picked schedule | 11.6 | 18% | 6% | 4% | 71% | 0.19 |
+| 8 | check_or_fold | baseline | 5.5 | 0% | 3% | 24% | 74% | 0.00 |
 
-v20 (v10 + learned schedule) scored 13.45 in its own run, about the same as v10.
+- The **learned schedule helped the rule line a lot** (v13 14.7 → v19 16.4) and **v12** (12.6 → v18 13.6), but not **v10** (v20). v20's search was probably too short.
+- 0–6 failed decisions per bot over 3,000 tables, all rare decisions over 100 ms. That's most likely Windows CPU spikes. Check on Linux.
+- **Recommended submission: v19.** Its learned schedule was tight with 6–7 players left (0.3–0.5×), loose with 4 left (1.6×) and very loose heads-up (2.7×).
 
 ## 0. TL;DR (what actually moved the score)
 
