@@ -4,6 +4,20 @@ Written for a Claude agent starting bot work on a **new variant** of the Sequoia
 
 ---
 
+## ⚡ SPEED IS THE TOP PRIORITY
+
+The build window is short: 60 minutes, then scored rounds every 20 minutes with rising weights. **A good bot uploaded now beats a great bot uploaded late.** A team with no active bot scores 0 for that round.
+
+- **Upload a safe bot in the first 10 minutes:** legal, never crashes, tight. Then improve it.
+- **Timebox every task to 10 minutes or less.** If a task runs over, cut its scope (fewer tables, skip tuning) rather than extend it.
+- **Parallelize.** Use one subagent per bot version, each writing only its own `vN/` folder. Then run one round-robin to decide.
+- **Pick fast methods.**
+  - Rules, tightness, ICM and cheap exact checks give big gains in minutes.
+  - CFR needs much more compute than the window allows. v1 took 10 minutes to train and lost to rules.
+  - A cross-entropy parameter search takes about 7 minutes on 16 cores and gave +1.3–1.5 points.
+- **Keep runtime fast too:** p99 decision time under 0.2 ms against a 1 ms limit, with no time bank in the upload test. Do heavy work at import.
+- **Don't wait on anything you don't need.** Run long jobs in the background, keep building, and commit and upload at every milestone.
+
 ## 0. TL;DR (what actually moved the score)
 
 1. **Scoring is about placing, not chips.** Payouts are 50/30/20 points for 1st/2nd/3rd and 0 for 4th–8th, averaged over thousands of 8-player tables. **Busting is the dominant loss.** A bot that only checks or folds (`check_or_fold`) beat every "smart" bot we wrote until we made them very tight. It never wins a table, but it slides into 2nd or 3rd while the others knock each other out.
