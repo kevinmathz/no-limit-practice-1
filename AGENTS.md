@@ -1,6 +1,6 @@
 # Instructions for AI coding assistants
 
-This repo is a mock of the Sequoia No Limit 2026 kit. The team bot is `bot/agent.py`.
+This repo is a mock of the Sequoia No Limit 2026 kit. The team bot is `v0/agent.py`.
 
 ## Hard rules for bot code. Breaking these gets the bot rejected or makes it lose.
 
@@ -13,5 +13,5 @@ This repo is a mock of the Sequoia No Limit 2026 kit. The team bot is `bot/agent
 
 ## Workflow
 
-- Before committing, run `python poker_agent.py check bot/agent.py`, then a 200-table `play` against the examples. You need 0 failed decisions and a p99 under 1 ms.
+- Before committing, run `python poker_agent.py check v0/agent.py`, then a 200-table `play` against the examples. You need 0 failed decisions and a p99 under 1 ms.
 - Keep changes small and measurable. Compare `avg_points` with a fixed `--seed`.

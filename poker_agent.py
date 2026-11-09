@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """MOCK of the kit's `poker-agent` command:  check | play | pack.
 
-  python poker_agent.py check bot/agent.py
-  python poker_agent.py play bot examples/check_or_fold examples/min_raiser --tables 200
-  python poker_agent.py pack bot out.zip
+  python poker_agent.py check v0/agent.py
+  python poker_agent.py play v0 examples/check_or_fold examples/min_raiser --tables 200
+  python poker_agent.py pack v0 out.zip
 """
 from __future__ import annotations
 

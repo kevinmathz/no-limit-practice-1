@@ -23,7 +23,8 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "v1"))
+BOT = os.environ.get("CFR_BOT", "v1")  # bot folder whose abstraction.py to train, and where policy is written
+sys.path.insert(0, str(ROOT / BOT))
 sys.path.insert(0, str(ROOT / "sdk"))
 
 from abstraction import (ACTIONS, DEPTHS, MAX_RAISES, N_PRE, RAISE_FRAC, hand_class,  # noqa: E402
@@ -115,7 +116,7 @@ def legal(st):
     if stacks[me] > to_call and stacks[opp] > 0:
         if nr < MAX_RAISES:
             pot2 = c0 + c1 + to_call
-            for x in "hp":
+            for x in RAISE_FRAC:
                 add = max(int(RAISE_FRAC[x] * pot2), BB)
                 if to_call + add < stacks[me]:
                     acts.append(x)
@@ -276,7 +277,7 @@ def main():
         if a.rebuild or not (CACHE / "deals.pkl").exists():
             t0 = time.time()
             pre, eq = build_pre_table(pool)
-            (ROOT / "v1" / "preflop_buckets.json").write_text(json.dumps(pre, sort_keys=True))
+            (ROOT / BOT / "preflop_buckets.json").write_text(json.dumps(pre, sort_keys=True))
             deals = build_deals(pool, pre)
             with open(CACHE / "deals.pkl", "wb") as f:
                 pickle.dump(deals, f)
@@ -287,8 +288,8 @@ def main():
         results = pool.map(_train_job, jobs)
     iters = sum(t for t, _ in results)
     policy = merge_policy(results)
-    (ROOT / "v1" / "policy.json").write_text(json.dumps(policy, separators=(",", ":"), sort_keys=True))
-    print(f"done: {iters:,} iterations, {len(policy):,} infosets -> v1/policy.json", flush=True)
+    (ROOT / BOT / "policy.json").write_text(json.dumps(policy, separators=(",", ":"), sort_keys=True))
+    print(f"done: {iters:,} iterations, {len(policy):,} infosets -> {BOT}/policy.json", flush=True)
 
 
 if __name__ == "__main__":
