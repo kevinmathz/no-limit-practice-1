@@ -35,6 +35,8 @@ python poker_agent.py pack v0 out.zip
 | `v4/` | v2 with every policy action under 8% removed and the rest renormalized. |
 | `v5/` | v1 with raise sizes by pot fraction (1/3, 2/3, 1, 1.5, 2.5 pot, all-in), each with its own frequency. Undertrained: 4.7M iterations. Retrain with `CFR_BOT=v5 python train/mccfr.py --minutes N`. |
 | `v6/` | v3 plus a minimum-defense-frequency floor (`mdf.py`: defend the strongest MDF share of the range against a bet) and a bluff cap. |
+| `v7/` | v3 with exact MDF: facing a bet, continue with exactly the top MDF share of its own (self-calibrated) range, never more or less. |
+| `v8/`-`v11/` | v0, v3, v4, v7 plus `tight.py`: preflop top 10% only (top 20% when short), postflop bet with top pair good kicker+, call with top pair+, stack-off guard. Off during late-game aggression. |
 
 Results of all bots plus check_or_fold over 2,000 8-seat tables (seed 41). "Out of money" means finishing 4th-8th. "Overfold" is the mean shortfall of the continue rate below MDF; `play` now reports it for every seat.
 
@@ -48,6 +50,8 @@ Results of all bots plus check_or_fold over 2,000 8-seat tables (seed 41). "Out 
 | v6 | 10.6 | 18% | 75% | 0.12 |
 | v5 | 6.3 | 10% | 83% | 0.20 |
 | v1 | 5.6 | 7% | 84% | 0.17 |
+
+Round-robin of all bots except v1 (`python train/roundrobin.py v0 v2 ... --tables 3000`; check_or_fold at every table, 7 random others): check_or_fold 20.6, v10 17.1, v9 13.8, v8 13.0, v11 12.9, v7 12.7, v0 11.5, v3 11.4, v4 9.2, v6 8.9, v2 8.1, v5 6.2 average points.
 
 ## Moving to the real kit
 
