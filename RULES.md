@@ -12,13 +12,12 @@
 
 The real variant will be announced at the event. The defaults below are **our guesses**. Bots should always read `state.config` and never hard-code these values.
 
-## Format
+## Format (from the official Format page)
 
-- Sit-and-go tables of 2 to 8 seats.
-- Everyone starts with 1,500 chips. Blinds rise every 10 hands: 10/20, 15/30, 25/50, 50/100 and so on (see `sdk/poker_engine/table.py`).
-- The hand cap is 150. If the table reaches it, the remaining players are scored by ICM on their stacks.
-- Payouts are 50/30/20 points for 1st, 2nd and 3rd. A round may draw different payouts per table, so read `state.config.payouts`.
-- Scoring is average points across tables.
+- 8 players per table. Starting stack 2,000. Blinds start 10/20 and rise every 20 hands (later levels are our guess). Hand cap 250.
+- A table ends when one bot holds every chip or the hand cap is reached; at the cap, survivors split remaining points by ICM.
+- Payouts 50/30/20 for 1st/2nd/3rd, 0 for 4th-8th. Multiple busts in one hand: more chips at the start of the hand places higher.
+- Round score = average points per table (5,000+ tables per round). 6 scored rounds, 20 min apart, weights 1x-6x. Build phase: 60 min after the variant is announced.
 
 ## Betting
 

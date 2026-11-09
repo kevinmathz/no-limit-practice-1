@@ -18,11 +18,11 @@ from .cards import DECK, best_hand
 
 DEFAULTS = dict(
     variant="keep-reveal-discard",  # or "reference-holdem"
-    starting_stack=1500,
+    starting_stack=2000,
     blinds=((10, 20), (15, 30), (25, 50), (50, 100), (75, 150), (100, 200),
             (150, 300), (200, 400), (300, 600), (400, 800), (600, 1200), (1000, 2000)),
-    hands_per_level=10,
-    hand_cap=150,
+    hands_per_level=20,
+    hand_cap=250,
     payouts=(50, 30, 20),
     decision_ms=1,
     time_bank_ms=100,
