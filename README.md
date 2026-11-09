@@ -24,6 +24,20 @@ python poker_agent.py pack bot out.zip
 | `sdk/poker_engine/` | The local simulator: sit-and-go tables, side pots, ICM at the hand cap and timing. **Bots must not import it.** |
 | `poker_agent.py` | A mock of the `poker-agent` command, with `check`, `play` and `pack`. |
 
+## Bots
+
+| Folder | What |
+| --- | --- |
+| `bot/` | Rule-based bot. It keeps its best two cards and reveals the weaker one, uses a hand score before the flop, and judges made hands after the flop. |
+| `v1/` | MCCFR bot. It reveals and discards at random, then bets from a strategy trained by `train/mccfr.py` (external-sampling MCCFR with regret-matching+ and linear averaging, on heads-up hold'em simplified to grouped hands and fixed bet sizes). To retrain, run `python train/mccfr.py --minutes 10`; it writes `v1/policy.json`. |
+
+Results of v1 against `bot/` over 1,000 tables (seed 11):
+
+| Matchup | v1 average points | bot average points |
+| --- | --- | --- |
+| Heads-up | 38.6 (wins 43%) | 41.4 (wins 57%) |
+| 8 seats: 4 v1, 4 bot | about 10.4 each | about 14.6 each |
+
 ## Moving to the real kit
 
 1. Copy `bot/agent.py` into the kit as `agent.py`.

@@ -29,7 +29,7 @@ LIMITS = dict(zip_bytes=50 * 2**20, unpacked=200 * 2**20, entries=1000, agent_py
 
 
 # ---------------- check ----------------
-def _check_source(name, src, errors, warnings):
+def _check_source(name, src, errors, warnings, local=()):
     try:
         tree = ast.parse(src, filename=name)
     except SyntaxError as e:
@@ -45,7 +45,7 @@ def _check_source(name, src, errors, warnings):
             top = m.split(".")[0]
             if top in BANNED:
                 errors.append(f"{name}: imports {top} (local-only, upload rejected)")
-            elif top not in sys.stdlib_module_names and top not in ALLOWED_3P:
+            elif top not in sys.stdlib_module_names and top not in ALLOWED_3P and top not in local:
                 warnings.append(f"{name}: imports {top}, not in the allowed package list")
     return tree
 
@@ -73,14 +73,16 @@ def check(path: str) -> int:
                     src = z.read(n)
                     if n == "agent.py" and len(src) > LIMITS["agent_py"]:
                         errors.append("agent.py over 1 MB")
-                    tree = _check_source(n, src.decode("utf-8", "replace"), errors, warnings)
+                    local = {Path(m).stem for m in names if m.endswith(".py")}
+                    tree = _check_source(n, src.decode("utf-8", "replace"), errors, warnings, local)
                     if n == "agent.py" and tree is not None:
                         _check_agent_class(tree, errors)
     else:
         src = p.read_bytes()
         if len(src) > LIMITS["agent_py"]:
             errors.append("agent.py over 1 MB")
-        tree = _check_source(p.name, src.decode("utf-8", "replace"), errors, warnings)
+        local = {f.stem for f in p.parent.glob("*.py")}
+        tree = _check_source(p.name, src.decode("utf-8", "replace"), errors, warnings, local)
         if tree is not None:
             _check_agent_class(tree, errors)
     for w in warnings:
