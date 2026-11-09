@@ -1,0 +1,183 @@
+CLAUDE PROMPT — COMPLEX BOT (target: our best bot, built in ~60 minutes with parallel agents)
+==========================================================================================
+
+ROLE AND GOAL
+Build a tournament poker bot FROM SCRATCH for the Sequoia "No Limit" bot tournament, using the
+official starter kit linked at the bottom, for the variant described at the bottom.
+You have ~60 minutes and up to 5 parallel subagents. Rebuild the full recipe of our best
+practice bot (kevin_v1: 19.6 avg points in a 22-bot round-robin vs 15.3 for the next best;
++12.6 points head-to-head over our best rule bot), adapted to the new variant. Skip everything
+under DO NOT BUILD. Always have a safe bot uploaded: milestone uploads at ~10, ~35, ~55 min.
+Tell me before any step that takes 5+ minutes; no single step over ~20 minutes; run long jobs
+in the background and keep building.
+
+READ FIRST (≤3 minutes): kit README.md, RULES.md, AGENTS.md, the SDK (State/Action/Event/
+Config), an example bot, the engine's table/showdown code (exact events and state fields),
+and the variant spec. The kit overrides this prompt on any conflict.
+
+-----------------------------------------------------------------------------------
+HARD CONSTRAINTS (every agent, every file)
+-----------------------------------------------------------------------------------
+1. TIME: act() < 1 ms. OUR GATE: 99.8th percentile of act() true cost <= 0.8 ms, and 0 failed
+   decisions in local play. Passive fallback (check if free, else fold) when late is fine.
+   - Heavy work only at import, then `import gc; gc.collect(); gc.freeze()`.
+   - Direct-index numpy arrays for lookups (e.g. a 52^3 index array, not a dict of tuples).
+   - Precompute per-cell tables instead of per-opponent numpy work, e.g.
+     EQP[cell, my_class, opp_public_info] = equity vs that opponent's prior range; only fall
+     back to vector math for opponents with showdown evidence.
+   - Soft deadline: t0 at the start of act(); past 0.55 ms skip optional work and take the
+     cheap action (chart action, or check/fold). Monte Carlo gets a wall-clock budget.
+   - OMP/MKL/OPENBLAS/NUMBA_NUM_THREADS=1 before numpy. No threads at import.
+2. STATE: nothing in self/globals between calls; per-table state only in `memory` bytes
+   (fixed-size binary codec, < 8 KB, parsed defensively). No info across tables.
+3. LEGALITY: only kinds in state.legal_actions; raise_to totals are ints in [min, max]
+   (total = whole bet this round). Helpers: raise_to (clamp), jam, call_or_check,
+   check_or_fold. Unknown phase -> Action(first.kind, first.min_amount).
+4. IMPORTS: stdlib, poker_agent_sdk, poker_agent_protocol, numpy (+ the kit's allowed list).
+   NEVER the kit engine or pokerkit, anywhere in the bot folder.
+5. ROBUSTNESS: try/except around every layer; read everything from state.config.
+6. PACKAGING: one WORK FOLDER: agent.py (literal `class Agent` with `act(self, state, memory)`)
+   + one .npz of tables loaded via __file__. Develop modules separately in a scratch folder
+   and generate agent.py with an amalgamator that embeds each module's source and exec's it
+   into its own module namespace (no helper-name collisions); the Agent class subclasses the
+   core agent so the checker sees it.
+7. WRITE SCOPE: only the WORK FOLDER and the scratch folder; each subagent only its own
+   files; no edits to the kit, other bots or shared repos; no git unless asked.
+
+-----------------------------------------------------------------------------------
+THE kevin_v1 ARCHITECTURE (build exactly these layers)
+-----------------------------------------------------------------------------------
+The game is a survival/placement tournament (50/30/20, 4th–8th = 0).
+L1 VARIANT DECISION: equilibrium mixed policy from a QUICK solve (A2) over canonical
+   (suit-isomorphic) classes, sampled with random.random(); heuristic mixed policy if A2
+   isn't ready. Never let public info be a deterministic function of private info.
+L2 TOURNAMENT VALUE (A3): exact top-3 Malmuth–Harville ICM vectorised over outcome rows;
+   hero-only fast path; busted hero = place payout; jam_ev / call_ev / risk_premium; plain
+   ICM at every horizon; exact rank settlement on the last hand only if the cap pays by rank.
+L3 SHORT STACK <= 25bb: push/fold chart from A2 (keyed by position, our class, which card we
+   made public, strongest public info of players behind / of the jammer), then the ICM check:
+   jam if EV(jam) − EV(fold) > +0.15 pts, fold if < −0.15, else follow the chart mix.
+   Callers' p_call = Σ posterior·chart_call_prob, scaled by observed call-vs-jam rate / 0.35
+   (clipped to [0.5, 2]); eq = our equity vs that calling range. Facing a jam: call_ev with eq
+   vs (posterior × chart jam prob), blended toward any-two by (jam_rate − 0.06)/0.25.
+   Facing a non-all-in raise while short: re-jam if jam_ev > fold (raiser call prob
+   0.35 + committed fraction), else fold.
+L4 DEEP PREFLOP — 3-BET OR FOLD:
+   - Unopened: open 2.5bb (+1bb per limper) if geometric-mean equity vs each player behind
+     >= 0.50 + 0.012·(n_behind − 1) (SB vs BB alone 0.48); BB vs limpers raise to 4bb if > 0.62.
+   - Facing a raise: raiser range = top (PFR/VPIP)·0.5^(raises−1) of their posterior, ×1.5.
+     eq >= 0.58 + rp -> 3-bet to 3x (jam if 2+ raises or it commits > 35% of stack);
+     BB defend if pot odds <= 0.30 and eq >= 0.50 + rp; call only if <= 6% of stack and
+     eq >= 0.55 + rp (single raise); else FOLD. rp = risk_premium clipped to [−0.05, 0.15].
+L5 POSTFLOP (A5): Monte Carlo vs each opponent's posterior hidden cards (their public cards
+   exact), ≤ 30 samples, budget ≈ 0.2 ms minus time used, exact on the river.
+   Facing a bet: eq_adj = eq · clip(1 − (1 − agg)·0.30·(0.5 + size), 0.45, 1.05);
+   need = pot odds + rp (+0.06 if the call is >= 30% of stack); raise if eq_adj >=
+   0.72 + 0.06·(opps − 1) + rp; call if eq_adj >= need; else fold.
+   Checked to us: value bet 0.62–0.75 pot if eq >= max(0.42, 0.62 − 0.1·(opps − 1)) + 0.5·rp;
+   jam if SPR <= 1.5 and eq >= 0.55; heads-up small bluff frequency only if rp < 0.08.
+   rp computed only when the stake is >= 25% of our stack.
+L6 OPPONENT MODEL (A5): per-seat counters + the variant's public-info habits linked to
+   showdowns; posterior over hidden parts = equilibrium prior × bucket multipliers from
+   showdown evidence (pseudo-count 15, pooled over similar ranks); action tilt for players
+   who raised/jammed this hand.
+
+-----------------------------------------------------------------------------------
+DO NOT BUILD (measured no gain or harmful in practice)
+-----------------------------------------------------------------------------------
+- Loose deep flat calls (largest leak found; replaced by 3-bet-or-fold = +8.5 pts).
+- Routing deep commit-sized raises through the ICM call path (tested −1.5 pts).
+- Long CFR runs: full tables = quick tables (no measurable difference). Cap A2 at a quick
+  solve. Never use a heads-up CFR abstraction at 8-max (our worst bot). No full-game MCCFR.
+- Monte Carlo horizon/blind-steal/lock-in adjustments on top of ICM (artifacts, no gain).
+- Rank-mode horizon modelling beyond the last hand (no gain); "shove the last hand" under
+  ICM settlement (coinflips never gain under ICM).
+- MDF defending, hand-picked bubble schedules (team tested: worse / no gain).
+- Old weak postflop call shading (5%); per-opponent numpy loops and big dict tables (timing).
+- Waiting on agents' report-writing or long diagnostics: stop them once outputs are in.
+
+-----------------------------------------------------------------------------------
+TIMELINE
+-----------------------------------------------------------------------------------
+MIN 0–10 — ME: SHARED SPEC + SAFE BASELINE
+- SPEC.md + common.py in scratch: card ids (rank*4+suit), the 169-class order, canonical
+  classes + action-index mapping for the variant decision, position convention (0 = button,
+  1 = SB, 2 = BB, 3 = UTG ...), file ownership, write scopes, output contracts (npz keys/shapes).
+- Safe baseline: helpers, fallback, heuristic mixed L1, tight preflop (top ~8%), push/fold
+  <= 12bb, value-only postflop, gc.freeze, soft deadline. `check` + 50 tables -> UPLOAD.
+
+MIN 3–25 — 5 PARALLEL AGENTS (launch in one message; give each SPEC.md, its files, its
+contract, and "QUICK version first, report in ≤250 words")
+A1 EQUITY: vectorised numpy 7-card evaluator (verify vs the engine on 20k hands; ≥1M
+   evals/s); hu_eq[169,169] (std err ≤ 0.003, ≤ 10 min on ≤ 6 cores); eq_vs_random[169,1..7].
+A2 QUICK SOLVER (skip if the variant adds no decision): mini-batch Monte Carlo CFR with
+   discounting over numpy integer-indexed regrets: L1 decision over canonical classes
+   (simultaneous = infosets exclude others' choices) + short-stack push/fold tree evaluated
+   in expectation. Grid players 2..8 × stacks {3,5,8,12,17,25,40}bb, ~35–45 s per cell,
+   6 workers, save each cell on completion (imap_unordered), finished in ≤ 10 minutes.
+   Outputs: choose policy, pf_open, pf_call (uint8 ×255), posterior[cell, public_rank, 169].
+A3 TOURNAMENT VALUE: icm_batch exact vs the engine icm() to 1e-9; hero fast path;
+   value_rows with place payouts and same-hand bust ordering; jam_ev, call_ev, risk_premium;
+   cap modes icm|rank (rank: exact settlement on the last hand only); unit tests.
+A4 HARNESS + OPPONENTS: opponents (tight bot showing low / high / random public info, jammer,
+   nit, maniac, a reader exploiting fixed public-info habits, the baseline); eval.py: fixed
+   seeds, multiprocessing, avg ± 95% CI, places, fails, p50/p99, --compare A B (paired seat
+   swap), --settle icm|rank, --hand-cap; round-robin (7 random from the pool +
+   check_or_fold fixed); chip-attribution diagnostic (chips and busts grouped by our first
+   voluntary action type, deep/short, small/big).
+A5 OPPONENT MODEL + POSTFLOP: binary memory codec (< 8 KB at 250 hands) updated from
+   state.events (link each seat's public info to its showdown); counters + smoothed
+   frequencies; fast posterior (L6); fast pure-Python evaluator; postflop_decide (L5) with
+   a time budget; legality fuzz on 3000 states.
+
+MIN 20–35 — ME: INTEGRATE core.py (L1–L6), bundle tables into one .npz, amalgamate, `check`,
+  timing gate, paired compare vs baseline -> UPLOAD.
+
+MIN 35–55 — ME: FIX LEAKS BY MEASUREMENT ONLY
+- Run the chip-attribution diagnostic; fix the single worst leak; paired A/B with ≥ 1000
+  tables (noise ±2 pts at 400–1000); keep only significant wins; snapshot builds/vN/.
+- If the cap pays by rank: add last-hand rank routing and A/B it with --hand-cap 60.
+- Only if everything passes and ≥ 10 minutes remain, one untested experiment: a survival
+  tilt when not the chip leader (kevin_v1 won 35% of tables but placed 2nd/3rd only 9%).
+  Ship it only if it wins a paired test.
+
+MIN 55–60 — FINAL: `check` OK; 0 failed decisions in 200 tables; true-cost p99.8 <= 0.8 ms;
+  beats the previous upload in a paired test (else keep the previous). UPLOAD.
+
+-----------------------------------------------------------------------------------
+TIMING METHOD
+-----------------------------------------------------------------------------------
+(a) True cost: record 1000–3000 real states vs strong bots; time act() 15x per state, take
+    the min; p50/p99/p99.8/max per phase. Gate p99.8 <= 0.8 ms.
+(b) Raw: kit play p99 + failed decisions. Heavy background jobs cause 10+ ms preemption
+    spikes even for trivial code; time on a quiet machine; cProfile the slowest states.
+
+-----------------------------------------------------------------------------------
+PROCESS RULES
+-----------------------------------------------------------------------------------
+- Verify each edit landed (grep a new constant in the built agent.py) before benchmarking.
+- Paired comparisons only; snapshot every benchmarked build for A/B and rollback.
+- When loading many bots in one process, isolate same-named helper modules.
+- Long compute: checkpoint per unit of work; quick version first; if slow, restart smaller.
+
+(Practice example, reference only: "keep-reveal-discard" — 3 cards dealt, each player
+simultaneously keeps 1 private, reveals 1 face up, discards 1, then NLHE. Quick-solve
+policy: show a lone Ace only 17–65% of the time; a revealed Ace was AA only 10–29%; pairs
+kept 55–97%; 40–75% of hands use a mixed reveal.)
+
+==================== FILL IN BEFORE SENDING ====================
+VARIANT SPEC:
+<paste the rules of the new variant here>
+
+OUR THOUGHTS ON THE VARIANT:
+<what we think matters: new decisions, public information, obvious edges>
+
+TEMPLATE / ENGINE CODE:
+<link or path to the starter kit / engine / example bot>
+
+WORK FOLDER + WRITE SCOPE:
+<e.g. "new folder kevin_vN in the kit repo; scratch in documents/tmp/<name>; nothing else">
+
+CAP SETTLEMENT (icm or rank) IF KNOWN, AND ANY CHANGED LIMITS:
+<e.g. "ICM at hand cap 250; decision_ms 1; payouts 50/30/20; cores available: 8">
+================================================================

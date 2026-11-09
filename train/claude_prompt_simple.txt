@@ -1,0 +1,152 @@
+CLAUDE PROMPT — SIMPLE BOT (target: a strong bot built and uploaded in ~20 minutes)
+===================================================================================
+
+ROLE AND GOAL
+Build a tournament poker bot FROM SCRATCH for the Sequoia "No Limit" bot tournament, using the
+official starter kit linked at the bottom, for the variant described at the bottom.
+You have ~20 minutes. Copy the recipe of our best practice bot (kevin_v1), which beat every
+other bot we built, and skip everything listed under DO NOT BUILD. A safe bot uploaded at
+minute 5 beats a great bot uploaded late. Tell me before any step that will take 5+ minutes.
+
+READ FIRST (≤2 minutes, skim): the kit's README.md, RULES.md, AGENTS.md, the SDK (State,
+Action, Event, Config), one example bot, and the variant spec. The kit overrides this prompt
+on limits, payouts, blinds, phases and action kinds.
+
+-----------------------------------------------------------------------------------
+HARD CONSTRAINTS
+-----------------------------------------------------------------------------------
+1. TIME: act() < 1 ms. OUR GATE: 99.8th percentile of act() true cost <= 0.8 ms, and 0
+   failed decisions in a 200-table local play. A passive fallback (check if free, else fold)
+   when running late is acceptable.
+   - All heavy work at import (tables, precompute, one warm-up act()), then
+     `import gc; gc.collect(); gc.freeze()` (removes multi-ms GC pauses inside act()).
+   - Lookups via numpy arrays / direct-index arrays; never big dicts of tuples.
+   - No per-opponent loops of small numpy ops when a precomputed table works.
+   - Soft deadline: t0 = perf_counter() at the start of act(); if > 0.55 ms has passed before
+     an optional expensive step, take the cheap action (chart/base action, or check/fold).
+   - OMP/MKL/OPENBLAS/NUMBA_NUM_THREADS=1 before importing numpy. No threads at import.
+2. STATE: nothing in self/globals between calls. Per-table state only in `memory` bytes
+   (parse defensively; garbage -> fresh model). No info across tables.
+3. LEGALITY: only kinds in state.legal_actions; raise_to totals are ints clamped to
+   [min_amount, max_amount] (total = whole bet this round). Helpers: raise_to (clamp),
+   jam, call_or_check, check_or_fold. Unknown phase -> Action(first.kind, first.min_amount).
+4. IMPORTS: stdlib, poker_agent_sdk, poker_agent_protocol, numpy (+ the kit's allowed list).
+   NEVER the kit engine or pokerkit, anywhere in the bot folder.
+5. ROBUSTNESS: try/except around every layer; read everything from state.config.
+6. PACKAGING: one self-contained WORK FOLDER, agent.py at its root with a literal
+   `class Agent` + `act(self, state, memory)`; data loaded relative to __file__.
+   Write only inside the WORK FOLDER (+ /tmp or scratch for scripts).
+
+-----------------------------------------------------------------------------------
+THE kevin_v1 RECIPE (what worked; build exactly these layers)
+-----------------------------------------------------------------------------------
+Results: 19.6 avg points in a 22-bot round-robin (next best 15.3); +12.6 points head-to-head
+over our best rule bot. The game is a survival/placement tournament (50/30/20, 4th–8th = 0).
+
+L1 VARIANT DECISION — balanced, not deterministic.
+   Strength first (keep the option with the best hand class), then mix between near-equal
+   options so public information never decodes private information (e.g. "always reveal the
+   lower card" makes a revealed Ace mean AA). Precompute a per-class policy table at import;
+   sample from it with random.random().
+L2 TOURNAMENT VALUE (exact ICM, numpy-vectorised over outcome rows [K,n]):
+     P1_i = s_i/T ; P2_i = s_i·Σ_{j≠i} s_j/(T(T−s_j))
+     P3_i = s_i·Σ_{j≠i}Σ_{k≠i,j} s_j s_k/(T(T−s_j)(T−s_j−s_k))
+     V_i = p1·P1 + p2·P2 + p3·P3 with payouts from state.config; zero stacks excluded;
+     if hero busts in a row: value = payout of place (#alive after + 1).
+   jam_ev: rows {fold, all fold, (win, lose) per caller in order}; at most one caller;
+     EV = P(all fold)·V(win pot) + Σ reach_j·p_j·[eq_j·V(win_j) + (1−eq_j)·V(lose_j)];
+     amount at risk = min(my total, caller total). call_ev: eq·V(win)+(1−eq)·V(lose) vs V(fold).
+   risk_premium(villain, amount) = breakeven equity − 0.5 from rows {win, lose, unchanged}.
+   Use plain ICM at every horizon (cap settles by ICM). Only if the cap pays by chip RANK:
+   on the very last hand use exact rank payouts and route every preflop decision through
+   jam_ev/call_ev (measured +1.6 pts when the cap is reached).
+L3 SHORT STACK (effective stack <= 25bb; eff = min(mine, biggest live opponent) / bb):
+   - Base: push/fold ranges (jam tighter with more players behind; strength vs a revealed
+     card if the variant shows cards).
+   - Then the ICM check: callers = players behind with p_call ≈ their calling-range share
+     (default 0.15–0.30, scaled by observed call-vs-jam rate / prior, clipped to [0.5, 2]),
+     eq = our equity vs that calling range. If EV(jam) − EV(fold) > +0.15 pts jam; < −0.15
+     fold; otherwise follow the base range (mixed).
+   - Facing a jam: call_ev with eq vs the jammer's range (widen toward any-two for players
+     with a high observed jam rate); same ±0.15 rule. Facing a non-all-in raise when short:
+     re-jam if jam_ev > fold, else fold.
+L4 DEEP PREFLOP (> 25bb) — 3-BET OR FOLD (our single biggest gain, +8.5 pts paired):
+   - Unopened: open 2.5bb (+1bb per limper) if the geometric mean of our equity vs each
+     player still to act >= 0.50 + 0.012·(n_behind − 1) (SB vs BB alone: 0.48).
+     BB with only limpers: raise to 4bb if equity > 0.62, else check.
+   - Facing a raise: raiser range = top (PFR/VPIP) share of their hands (halved per extra
+     raise), widened ×1.5. If eq >= 0.58 + rp: 3-bet to 3x (jam if already 2+ raises or the
+     3-bet would commit > 35% of stack). Else BB-only defend if pot odds <= 0.30 and
+     eq >= 0.50 + rp. Else call only if the call is <= 6% of stack and eq >= 0.55 + rp
+     (single raise only). Else FOLD. rp = risk_premium clipped to [−0.05, 0.15].
+L5 POSTFLOP:
+   - Equity: Monte Carlo over each live opponent's possible hidden cards (posterior-weighted
+     by their public info), ≤ 30 samples (fewer multiway), wall-clock budget ≈ 0.2 ms
+     minus time already used; exact on the river.
+   - Facing a bet: eq_adj = eq · clip(1 − (1 − agg)·0.30·(0.5 + size), 0.45, 1.05)
+     (agg = opponent postflop aggression, default 0.4; size = to_call / pot before the bet).
+     need = to_call/(pot + to_call) + rp, +0.06 if the call is >= 30% of our stack.
+     Raise if eq_adj >= 0.72 + 0.06·(opps − 1) + rp (jam if SPR <= 1.2); call if eq_adj >= need
+     (jam instead if SPR <= 0.6 and eq_adj >= 0.5 + rp); else fold.
+   - Checked to us: value bet 0.62 pot (0.75 river or eq >= 0.8) if eq >= max(0.42,
+     0.62 − 0.1·(opps − 1)) + 0.5·rp; jam if SPR <= 1.5 and eq >= 0.55. Heads-up only and
+     rp < 0.08: occasional bluffs (river eq < 0.15, flop/turn eq < 0.35), frequency
+     ≈ 0.22 × fold_to_raise / 0.55, capped at 0.35–0.40.
+   - Compute rp postflop only when the stake is >= 25% of our stack (it costs time).
+L6 OPPONENT MODEL (memory, < 8 KB): per seat: hands, VPIP, PFR, jams, all-in calls / chances,
+   fold-to-raise, postflop bets vs checks, plus the variant's public-info habits linked to
+   showdowns. Smooth as (x + k·prior)/(n + k): vpip 0.30, pfr 0.15, jam 0.06 (k 20),
+   call_jam 0.35 (k 8), fold_to_raise 0.55, aggression 0.40. Posterior over a seat's hidden
+   part = prior × bucket multipliers from its showdowns (pseudo-count 15) so exploitation
+   grows only with evidence.
+
+-----------------------------------------------------------------------------------
+DO NOT BUILD (measured no gain or harmful in practice)
+-----------------------------------------------------------------------------------
+- Loose deep flat calls of raises (the biggest leak we found: −0.7 to −3 bb per hand).
+- Routing deep commit-sized raises through the ICM call path (tested: −1.5 pts).
+- Long CFR training: a full solve was no better than a 6-minute quick solve; heads-up CFR
+  played 8-max was our worst bot. In 20 minutes use a heuristic mixed policy, no CFR.
+- Monte Carlo "horizon" adjustments to ICM, blind-steal drift, or hand-cap "lock-in" premiums
+  under ICM settlement (artifacts / untested). Plain ICM.
+- "Shove the last hand" under ICM settlement (a coinflip never gains points under ICM).
+- MDF defending, hand-picked bubble/players-remaining schedules (team tested: worse/no gain).
+- Uncalibrated postflop equity vs bettors (old 5% shading lost chips) — use the formula in L5.
+
+-----------------------------------------------------------------------------------
+BUILD PLAN
+-----------------------------------------------------------------------------------
+MIN 0–5   Scaffold: helpers, try/except fallback, phase dispatch, L1 heuristic, tight preflop
+          (top ~8%) + push/fold <= 12bb + value-only postflop. `check`, 50-table play, UPLOAD.
+MIN 5–15  Replace with L2–L6 in this order: L2, L4, L5 (call shading first), L3, L6.
+          Hand-strength tables at import: 169-class equity vs 1 random hand (fast Monte Carlo
+          ≤ 2 s or a Chen-style score), equity matrix vs ranges if time; class id from cards.
+MIN 15–20 Gates: (1) record ~1000 real states, time act() 15x each, take the min:
+          p99.8 <= 0.8 ms (else cut samples / precompute more / tighten the soft deadline);
+          (2) `check` OK and 0 failed decisions in 200 tables vs check_or_fold + examples;
+          (3) paired compare (same seeds, swap our seat) vs the minute-5 bot — noise is
+          ±2 pts at 400 tables; (4) grep the built agent.py for a new constant to confirm
+          edits landed. UPLOAD the better one. Report avg points, places, fails, timing.
+Don't benchmark timing while heavy jobs run (10+ ms preemption spikes even for trivial code).
+
+(Practice example, reference only: "keep-reveal-discard" — 3 cards dealt, each player
+simultaneously keeps 1 private, reveals 1 face up, discards 1, then NLHE. kevin_v1: keep the
+strongest pair, show a lone Ace only ~20–65% of the time, condition opponents' ranges on
+their revealed card.)
+
+==================== FILL IN BEFORE SENDING ====================
+VARIANT SPEC:
+<paste the rules of the new variant here>
+
+OUR THOUGHTS ON THE VARIANT:
+<what we think matters: new decisions, public information, obvious edges>
+
+TEMPLATE / ENGINE CODE:
+<link or path to the starter kit / engine / example bot>
+
+WORK FOLDER + WRITE SCOPE:
+<e.g. "new folder kevin_vN in the kit repo only; scratch files in /tmp">
+
+CAP SETTLEMENT (icm or rank) IF KNOWN, AND ANY CHANGED LIMITS:
+<e.g. "ICM at hand cap 250; decision_ms 1; payouts 50/30/20">
+================================================================
