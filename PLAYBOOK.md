@@ -20,23 +20,60 @@ The build window is short: 60 minutes, then scored rounds every 20 minutes with 
 
 ## Top 8 bots (latest)
 
-From a 3,000-table match (seed 171) with all 8 at one table. "Out" means finishing 4th–8th.
+From a 3,000-table match (seed 191) with all 8 at one table. "Out" means finishing 4th–8th.
 
-| Rank | Bot | Lineage | Avg points | 1st | 2nd | 3rd | Out |
-|---|---|---|---|---|---|---|---|
-| 1 | **v21** | v19, with deep preflop stack-offs only with QQ+/AK | **17.2** | 21% | 15% | 10% | 53% |
-| 2 | v22 | v19, with stack-offs only with KK+ | 15.7 | 15% | 18% | 14% | 53% |
-| 3 | v19 | v13 + learned players-remaining schedule | 15.5 | 23% | 10% | 6% | 61% |
-| 4 | v13 | rule line: v0 + ICM + river fold + tight + lock | 13.0 | 21% | 8% | 4% | 68% |
-| 5 | v18 | v12 + learned schedule | 11.5 | 7% | 15% | 16% | 62% |
-| 6 | v12 | CFR line, tight + lock | 11.4 | 6% | 16% | 15% | 62% |
-| 7 | v10 | CFR line, tight | 11.1 | 7% | 16% | 13% | 64% |
-| 8 | check_or_fold | baseline | 4.7 | 0% | 2% | 20% | 78% |
+| Rank | Bot | Lineage | Avg points | 1st | 2nd | 3rd | Out | p99 ms |
+|---|---|---|---|---|---|---|---|---|
+| 1 | **kevin_v1** | CFR keep/reveal + push/fold, exact tournament-points EV, opponent model, Monte Carlo postflop | **25.0** | **46%** | 4% | 3% | 46% | 0.54 |
+| 2 | v23 | v21 with late aggression off | 13.4 | 8% | 20% | 15% | 57% | 0.21 |
+| 3 | v21 | v19 with stack-offs only with QQ+/AK | 13.3 | 10% | 19% | 14% | 57% | 0.22 |
+| 4 | v19 | v13 + learned schedule | 12.3 | 14% | 13% | 7% | 66% | 0.26 |
+| 5 | v18 | v12 + learned schedule | 11.3 | 4% | 17% | 21% | 59% | 0.16 |
+| 6 | v13 | rule line | 10.1 | 13% | 9% | 5% | 73% | 0.23 |
+| 7 | v10 | CFR line, tight | 9.9 | 4% | 15% | 15% | 65% | 0.14 |
+| 8 | check_or_fold | baseline | 4.8 | 0% | 2% | 20% | 77% | 0.00 |
 
-- **Fixing the stack-off leak gave +1.7 points (v19 → v21).** v19's "premium" range was the top 4% of hands by equity against a random hand, which ranks 99–77 above AK. A sampled hand showed v19 putting 86 big blinds in with 99 against QQ. **Use an explicit hand set for stack-offs, not an equity percentile.**
-- **v23** (v21 with late-game aggression off) scored 16.7 against v21's 16.9 in a separate 3,000-table run (seed 181), the same within noise. See §4.2.
-- **Timeouts:** 3–10 per bot over 3,000 tables, all single decisions of 100–130 ms that exhausted the time bank. They are most likely Windows CPU spikes. Check on Linux.
-- **Recommended submission: v21,** or v23 for simpler logic near the cap.
+**kevin_v1 almost doubles our best bot's score.** Its p99 decision time of 0.54 ms is close to the 1 ms limit. It had 7 timeouts over 899k decisions; one was the time bank running dry after many slightly slow decisions. Time it on a quiet Linux box. Without v21's stack-off fix, our best scored 17.2 in a field without kevin_v1 (seed 171).
+
+### Why kevin_v1 wins: it models the variant's public information
+1. **Card choice (keep/reveal/discard):** a CFR-balanced mixed strategy over 1,755 suit-isomorphic 3-card classes, solved for each player count (2–8) and effective stack (3–40 big blinds). Reveals are mixed, so opponents can't read the hidden card. Our bots always revealed the weaker card, which leaked information.
+2. **Opponent model in `memory`:**
+   - each seat's reveal habits, VPIP, PFR, jam and call-vs-jam rates, and aggression;
+   - the posterior over each opponent's hidden card is the CFR prior blended with this evidence (Dirichlet, pseudo-count 15), so it exploits only as data arrives.
+3. **Short stacks (25 big blinds or less):**
+   - a CFR push/fold chart conditioned on the revealed ranks;
+   - checked against the **exact tournament-points EV** (ICM plus the hand-cap horizon), using calling ranges from the chart and the model;
+   - clear spots go by EV, close spots follow the CFR mix.
+4. **Deep stacks:** equity against ranges conditioned on the revealed cards. It opens, or 3-bets/folds, with no loose flat calls, and an ICM risk premium.
+5. **After the flop:** Monte Carlo equity against each opponent's posterior hidden card (their revealed card is exact), shaded against bettors, with a stack-off margin.
+6. **Engineering:**
+   - one generated, self-contained `agent.py` with the sources embedded, plus a `.npz` table;
+   - a fast key-sum 5/6/7-card evaluator;
+   - `gc.freeze()` at import so garbage collection never pauses `act`.
+
+**Lesson:** our layers (tightness, ICM, exact folds and locks) are cheap, quick to build and worth about +5 points over naive play. **Modeling the variant's information structure** (balanced reveals, posteriors over hidden cards, exact EV in points) was worth about **+12 more**. In a new variant, find its information structure first.
+
+### The cost: hours of CFR solving. Making it fit the competition
+kevin_v1's solves took hours. The variant is only announced at the start, so the solve must be redone in about 60 minutes plus the gaps between rounds.
+
+1. **Have the pipeline ready before the event.** Make the solver general over the variant's new decision (choose phase, reveal rules) so only the game definition changes. Test it end to end on a practice variant.
+2. **Solve only what's novel and high-value:**
+   - the variant's new decision, like the choose phase;
+   - short-stack push/fold.
+
+   Reuse the fast layers (tightness, ICM, exact folds and locks, Monte Carlo equity) everywhere else.
+3. **Shrink the grid first:** fewer stack buckets (for example 5, 10, 20, 40 big blinds), player counts grouped as {2, 3, 4–5, 6–8}, coarser card classes. Refine later.
+4. **Parallelize across the grid on ORCD CPUs:**
+   - each (player count × stack) cell is an independent solve, so use a SLURM array job;
+   - 7 player counts × 8 stacks = 56 cells on 56+ cores takes the time of one cell;
+   - pure-Python CFR is CPU-bound, so cores help more than GPUs.
+5. **GPUs only for a vectorized solver:** full-width CFR on small games (push/fold, the choose phase) as tensor operations over all hands at once (torch, cupy). That's a rewrite. Worth it only if a single cell is still too slow on CPU.
+6. **Ship anytime and improve between rounds:**
+   - upload a bot with a coarse solve by about minute 30;
+   - keep solving, and swap in better tables before later rounds.
+
+   Round weights are 1× to 6×, so **rounds 4–6 carry 71% of the score**. A solve that finishes 60–100 minutes after the build ends still counts heavily.
+7. **Use warm starts:** start each cell from the neighboring cell's or the practice variant's strategy, which converges much faster than starting cold.
 
 ### Previous top 8 (seed 161, before v21)
 v19 16.4, v13 14.7, v18 13.6, v10 13.2, v12 12.6, v20 12.4, v15 11.6, check_or_fold 5.5.
