@@ -38,6 +38,8 @@ python poker_agent.py pack v0 out.zip
 | `v7/` | v3 with exact MDF: facing a bet, continue with exactly the top MDF share of its own (self-calibrated) range, never more or less. |
 | `v8/`-`v11/` | v0, v3, v4, v7 plus `tight.py`: preflop top 10% only (top 20% when short), postflop bet with top pair good kicker+, call with top pair+, stack-off guard. Off during late-game aggression. |
 | `v12/`, `v13/` | v10, v9 made tighter (preflop top 6%, bet two pair+, call top pair good kicker+, continue facing a bet only with the top min(MDF, 30%) of range), plus `lock.py`: when no unseen card lets any opponent beat us right now, bet about pot (river: 0.95 pot, bypassing the tight filter and the ICM veto). |
+| `v14/`-`v17/` | Tightness by players remaining: v14 = v13 + step schedule A, v15 = v13 + smooth schedule B (plus a doubled ICM margin on the bubble), v16 = v10 + A, v17 = v10 + B. None beat its base clearly. |
+| `v18/` | v12 + a looseness multiplier per players-remaining count, learned by cross-entropy search over simulated tables (`train/learn_schedule.py`, writes `v18/schedule.json`). |
 
 Results of all bots plus check_or_fold over 2,000 8-seat tables (seed 41). "Out of money" means finishing 4th-8th. "Overfold" is the mean shortfall of the continue rate below MDF; `play` now reports it for every seat.
 
@@ -55,6 +57,8 @@ Results of all bots plus check_or_fold over 2,000 8-seat tables (seed 41). "Out 
 Round-robin of all bots except v1 (`python train/roundrobin.py v0 v2 ... --tables 3000`; check_or_fold at every table, 7 random others): check_or_fold 20.6, v10 17.1, v9 13.8, v8 13.0, v11 12.9, v7 12.7, v0 11.5, v3 11.4, v4 9.2, v6 8.9, v2 8.1, v5 6.2 average points.
 
 Round-robin with gentler blinds (seed 101, 3,000 tables): check_or_fold 18.3, **v12 17.7**, v10 15.9, v13 14.4, v7 12.0, v9 11.7, v11 11.4, v0 10.9, v8 10.6, v3 10.2, v4 10.0, v6 7.8, v2 7.4.
+
+See **PLAYBOOK.md** for the full write-up of what we learned, written for a Claude agent starting on a new variant.
 
 ## Moving to the real kit
 

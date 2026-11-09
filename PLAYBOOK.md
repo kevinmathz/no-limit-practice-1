@@ -1,0 +1,179 @@
+# Pokerbot playbook: lessons from the practice run
+
+Written for a Claude agent starting bot work on a **new variant** of the Sequoia No Limit tournament. Read it alongside the official kit (`README.md`, `RULES.md`, `AGENTS.md` and the SDK), which is more complete than our mock. Where the two disagree, **the kit wins**.
+
+---
+
+## 0. TL;DR (what actually moved the score)
+
+1. **Scoring is about placing, not chips.** Payouts are 50/30/20 points for 1st/2nd/3rd and 0 for 4th–8th, averaged over thousands of 8-player tables. **Busting is the dominant loss.** A bot that only checks or folds (`check_or_fold`) beat every "smart" bot we wrote until we made them very tight. It never wins a table, but it slides into 2nd or 3rd while the others knock each other out.
+2. **Tightness gave the biggest gains, by far.** Wrapping any bot in a tightening layer gave +1.5 to +8 points: play only the top ~6–10% of hands preflop, bet two pair or better, call top pair (good kicker) or better, and add a guard against committing the stack. Do this first.
+3. **ICM-aware commits and a river "can't win" fold helped a bit.** The river check uses the variant's public information. Bet hard with a lock (a hand no unseen card can beat) and fold when the hand is drawing dead.
+4. **CFR (MCCFR) on a heads-up abstraction lost to simple rules at 8-max.** Its low-probability "noise" actions and its heads-up ranges played multi-way got it busted early: 86% of seats, half of them by hand 6. Pruning actions under 8%, then adding ICM and tightness, made it competitive (v10/v12), but most of that gain came from the tightness, not the CFR.
+5. **Clever theory hurt in a field of passive bots.** MDF-based defending (v6, v7) and hand-tuned schedules by players remaining (v14–v17) did no better or worse in this field. **Measure everything against `check_or_fold` and your current best, and keep only changes that win in simulation.**
+6. **Process.** Build the safe template and the harness first, then tighten, add ICM, then add variant-specific edges. Run each check in under 10 minutes. Use a fixed seed with 2,000+ tables per comparison; noise is about ±0.3–0.5 points.
+
+---
+
+## 1. The platform: hard constraints that break bots
+
+These come from the official docs, and our mock enforces them. Check the new kit's README for changes.
+
+- **Interface:** `class Agent(poker_agent_sdk.Agent): def act(self, state, memory) -> (Action, bytes)`.
+  - Actions: `Action.fold()`, `check()`, `call()`, `raise_to(total)`, where `total` is the **whole bet for this betting round**.
+  - Variants may add kinds and phases (ours added `choose`). Always pick from `state.legal_actions`.
+  - For the automatic choice, return `Action(first.kind, first.min_amount)` with `first = state.legal_actions[0]`.
+- **Time:** 1 ms per decision by default, with a 100 ms time bank per table. **The upload test match has no bank:** 20 hands against a check/fold bot, and the upload is rejected if more than 10% of decisions fail. Do heavy work at import (tables, model loads, one warm-up prediction). Our bots run at a p99 of 0.03–0.2 ms in pure Python.
+- **Rare long decisions:** Windows sometimes produced 1–100 ms decisions under CPU load. Two runs logged a "timeout, bank exhausted" at 102 ms. Keep `act` far below 1 ms and avoid big allocations in it.
+- **State between calls:** `self` and globals are unreliable, because copies are forked and any copy may answer any table. Per-table state goes in `memory` bytes (64 KB, truncated), parsed defensively. Carrying information between tables is against the rules. Constants loaded at import are fine.
+- **Legality:** return only offered kinds. Raise totals must be **ints** within `[min_amount, max_amount]`; floats are rounded down, and out-of-range amounts are not clamped and count as failed decisions. Clamp every raise with a helper (see `v0/agent.py: raise_to`).
+- **Imports:** stdlib, `poker_agent_sdk`, `poker_agent_protocol`, numpy, scipy, pandas, scikit-learn, torch (CPU), lightgbm, xgboost, onnxruntime, numba and eval7. **Never import `poker_engine` or `pokerkit`**, not even in an unused file in the zip.
+- **Packaging:** upload `agent.py`, or a zip with `agent.py` at the root plus the files it reads. A bot folder must be self-contained.
+  - Helper modules sit next to `agent.py`. Add `sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))` before importing them.
+  - Load data files by path relative to `__file__`.
+  - The bot directory is read-only and not executable; `/tmp` is the only writable place.
+- **Threads:** set `OMP/MKL/OPENBLAS/NUMBA_NUM_THREADS=1` before importing numpy or torch. Threads started at import don't survive the fork.
+- **Wrap everything:** put `try/except` around every bot layer, with a fallback (check if free, else fold, else the automatic choice). One exception costs one decision. Crashes cost restarts.
+
+---
+
+## 2. Format facts that drive strategy (2026 regional; verify for finals)
+
+- **Table:** 8 players, 2,000-chip stacks, blinds start 10/20 and rise every 20 hands, hand cap 250.
+- **End of table:** at the cap, the survivors split the remaining points by **ICM** on their stacks.
+- **Payouts:** 50/30/20 by default, but read `state.config.payouts`, since rounds may draw others.
+- **Busting together:** when several players bust in the same hand, the one with more chips at the start of the hand places higher.
+- **Scoring:** each round's score is average points per table over at least 5,000 tables. There are 6 scored rounds with weights 1×–6×, 20 minutes apart. The first 60 minutes are build time.
+- **Read `state.config`** and never hard-code: decision_ms, time_bank_ms, memory_bytes, the blinds schedule, hand_cap, payouts.
+- **Consequence:** this is a **survival tournament**. Finishing 4th is worth the same as 8th. With ICM, losing chips hurts more than winning them helps, so when in doubt, fold.
+
+---
+
+## 3. Scaffolding to build first (about 30 minutes)
+
+Mirror what we built in `pokerbot-practice`, but put the real kit's engine underneath.
+
+1. **A safe template bot**, like `v0/agent.py`:
+   - legal-action helpers (`raise_to` clamp, `call_or_check`, `check_or_fold`);
+   - defensive memory JSON;
+   - a `try/except` fallback;
+   - a phase dispatch: `if state.phase != "betting"` → the variant's handler.
+2. **Baseline opponents:** `check_or_fold`, `min_raiser`, `calling_station`, `random_bot`. **Always keep `check_or_fold` in your test fields.** Weak spewing bots inflate how much survival is worth, so also test against your own strong bots.
+3. **Harness** (the real kit has `poker-agent play`):
+   - fixed seeds;
+   - per seat: average points, a place histogram, out-of-money %, failed decisions by kind, and act-time p50/p99/max;
+   - a round-robin script (`train/roundrobin.py`): a pool of bots, 7 drawn at random per table, plus fixed seats.
+4. **Module isolation:** if you load several bots in one Python process, isolate their same-named helper modules (`abstraction`, `icm`, `tight`, ...). Otherwise every bot silently uses the first one loaded. **This bug corrupted several of our comparisons.** See `poker_agent.py: load_agent_class`.
+5. **Version folders:** use `v0/`, `v1/`, …, each self-contained. Write a one-line description in the docstring on line 1 of each `agent.py`, and keep a results table in the README.
+
+---
+
+## 4. Layers that worked, in order of value
+
+Each layer wraps the previous one's action. The order matters.
+
+```
+act(state):
+  if phase is variant-specific  -> variant handler (e.g. keep/reveal/discard)
+  1. guaranteed-loss fold (river)        # showdown.py
+  2. lock aggression (can't lose now)    # lock.py: bet ~pot, bypasses filters on the river
+  3. base action (rules or CFR policy)
+  4. ICM review / veto                   # icm.py
+  5. tight filter + top-of-range filter  # tight.py (skipped in late-game aggression mode)
+```
+
+### 4.1 Tight layer (`v12/tight.py`): the biggest win
+- **Preflop:** continue only with the top `PRE_TOP` share of hands by equity against a random hand. Use 6% (v12/v13) or 10% (v8–v11). Widen to 15–20% when at 15 big blinds or less.
+- **Postflop:** bet or raise only with bucket 5+ (two pair or better). Call only with bucket 4+, or bucket 1+ when the call is at most 25% of the pot.
+- **Stack-off guard:** committing more than 35% of the stack needs a premium preflop hand (top 4%) or two pair or better.
+- **Top-of-range filter:** facing a bet, continue only with the top `min(MDF, 30%)` of the range.
+- **Late-game aggression:** in the last 25 hands before the cap, when not the chip leader, the filter is skipped.
+- **Effect:** v4 went from 9.2 to v10 at 17.1 points in the round-robin; v3 went from 11.4 to v9 at 13.8.
+
+### 4.2 ICM (`v3/icm.py`)
+- **Valuation:** Malmuth-Harville ICM over the non-busted stacks with `state.config.payouts`. Computing it for 8 players takes about 0.05 ms.
+- **Tournament-life decisions:** a call of an all-in, or any commitment that leaves less than 15% of the stack. Commit only if p·ICM(win) + (1−p)·ICM(lose) > ICM(fold) + margin.
+  - p comes from equity tables (169 preflop classes, postflop buckets per street) against a random hand.
+  - p is raised to the power `1 + 0.8·(opponents−1)`, then shaded down further when facing a bet.
+- **Bust-aversion margin, in points:** 1.5 with 4–5 players left, 0.8 with 3 or 6, 0.4 with 7–8, and 0 heads-up.
+- **Late-game aggression:** in the last 25 hands before the cap, when not the chip leader, the margin is 0 and play widens. The chip leader near the cap plays tighter.
+- **Effect:** about −7 percentage points in the bust rate against v0 alone, and +1.3 points head-to-head.
+
+### 4.3 Public-information checks (variant-specific; ours revealed one hole card)
+- **Guaranteed-loss fold** (`showdown.py`, river only):
+  - if some live opponent beats us for **every** unseen card x (their hand = revealed card + x + board), fold to any bet;
+  - unseen = deck − our cards − our discard − board − all revealed cards;
+  - a tie is not a loss.
+- **Lock aggression** (`lock.py`):
+  - if no unseen card lets any opponent beat or tie past us right now, bet about pot;
+  - on the river it's a true lock: bet 0.95× pot, raise to about pot, and skip the filters;
+  - it fires on about 10% of postflop checks.
+- **Fast evaluator:** a table-driven 7-card scorer (`score7`) with an early exit at the first card that changes the answer, deduplicated by rank (suits only matter when a flush is possible). Worst case with 7 opponents: p99 0.46 ms.
+- **For a new variant, ask:** what information does it make public, and can it prove a loss or a win? Those are free, exact edges.
+
+### 4.4 Pruning a CFR policy
+- Remove actions with probability under 8% and renormalize. v2 went from 8.3 to v4 at 9.4 points.
+- **Why:** 28.5% of v1's busts came from actions its policy gave under 10%.
+
+---
+
+## 5. What didn't work (and why) — don't repeat it blindly
+
+| Idea | Result | Why |
+|---|---|---|
+| Heads-up MCCFR policy used directly at 8-max (v1) | worst bot, about 6 points | Heads-up ranges played multi-way. Stacks over 80 big blinds were treated as 80. Low-probability shoves. Raise sizes lumped into "half pot", "pot" and all-in. Busted at a median of hand 6. |
+| More raise sizes, as pot fractions (v5) | worse than v1 | Twice the infosets, but trained for only 4.7M iterations. Undertrained. |
+| MDF as a floor (v6) or exact MDF (v7) | −2 to −5 points against v3 | The field barely bluffs, so defending at MDF pays off value bets. MDF assumes a balanced opponent; ours were exploitable and passive. If you use it, **calibrate the range table to your own range in that spot** (v7 continued 82% against a 66% target until it was calibrated). |
+| Tightness schedules hand-picked by players remaining (v14–v17) | −0.3 to −1.8 points | Extra tightness on the bubble (4–5 left) lost chips to the blinds, and loosening in the top 3 gave back ICM. → Learn schedules from simulation instead (§6). |
+| Random keep/reveal/discard (v1) | throws away the best card | In variants with card choices, use a cheap heuristic (keep the best 2-card combination, reveal the weaker card). |
+
+---
+
+## 6. Learning parameters quickly (cross-entropy search over simulation)
+
+`train/learn_schedule.py` tunes a looseness multiplier for each player count (2–8) on v12's tight layer:
+- the cross-entropy method, 16 candidates per generation, 500 tables per candidate;
+- common random seeds within a generation, so candidates are compared on the same deals;
+- 16 cores;
+- a 4,000-table validation against the untuned baseline at the end.
+
+Use the same pattern for any constant: thresholds, ICM margins, the aggression window. **It is optimal only against the field it was trained on.** Keep the field diverse (your best bots, a CFR bot and `check_or_fold`), and accept a change only if it wins on fresh seeds.
+
+(Results are appended in §9.)
+
+---
+
+## 7. CFR notes (if you try it again)
+
+- **Trainer:** `train/mccfr.py`, external-sampling MCCFR (Lanctot et al. 2009, the same algorithm as OpenSpiel and slumbot2019) with regret-matching+ and linear averaging, in pure Python. It ran about 25k iterations/s on 16 cores; v1 got 15M iterations in 10 minutes.
+- **Abstraction:**
+  - heads-up, stack depths of 10/20/40/80 big blinds;
+  - 8 preflop equity buckets and 9 postflop made-hand buckets (imperfect recall);
+  - key = depth|street|bucket|spr|current-street history.
+- **Deals:** sampled from a precomputed pool, 400k deals with buckets and the showdown winner. Training needs no evaluator.
+- **Infosets with different legal action sets:** key the infoset by legal-action set as well, then keep the most-visited set.
+- **Convergence:** two seeds differ by about 4% (total variation, visit-weighted), worst preflop. The bot fell back to rules in 1% of decisions.
+- **Before trusting it at 8-max:** train on **points or ICM utility**, not chips. Add multi-way or position context. Cap stack-offs. Prune actions under 8%. Otherwise the tightness and ICM layers do the real work.
+- GPUs don't help this trainer; it's a pure-Python tree walk. A CPU cluster (MIT ORCD) helps for long runs.
+
+---
+
+## 8. Workflow tips for a time-boxed event
+
+- **Timebox every task to 10 minutes or less.** Run independent builds in parallel subagents, each creating only its own `vN/` folder, then compare everything in one round-robin.
+- **Always compare** with a fixed seed and 2,000–4,000 tables, against `check_or_fold` plus your current best. Report points, 1st %, out-of-money (4th–8th) % and failed decisions.
+- **Gate changes:** check passes, 0 failed decisions, p99 well under 1 ms. Ship only a version that beats the current best in the round-robin.
+- **Commit after each milestone.** Upload early (one upload per 30 s). Every scored round snapshots the active bot when it starts, and a missing bot scores 0.
+- **Hand histories** are available after each round. Mine them for opponent tendencies, which are aggregate only, since there's no cross-table memory.
+
+---
+
+## 9. Final standings (practice variant: keep-reveal-discard, gentle blinds)
+
+Top-8 match, 3,000 tables: **v12 15.8**, v10 15.7, check_or_fold 14.8, v13 12.5, v11 10.8, v9 10.8, v7 10.5, v0 9.2.
+
+Round-robin, 4,000 tables (check_or_fold at every table): v12 15.2, v17 14.9, v10 14.8, v16 14.5, v13 13.9, v14 13.0, check_or_fold 12.8, v15 12.6, v11 11.1, v9 10.5, v8 10.4, v7 9.7, v0 9.0.
+
+7 copies of v12 against 1 check_or_fold, 2,000 tables: v12 13.7 per seat, check_or_fold 4.3 (it never finishes 1st or 2nd, 3rd 21% of the time). Tight bots eliminate the check/fold exploit.
+
+**Recommended starting point for a new variant:** copy v12's layered structure (tight + ICM + public-info checks), replace the variant-specific pieces, add the baselines and harness, and run the parameter search from §6.
