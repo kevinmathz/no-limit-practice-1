@@ -285,7 +285,7 @@ def freqs(m, s):
 
 
 # ---------------------------------------------------------------- L2 ICM
-def icm_hero(R, h, pay):
+def icm_hero_top3(R, h, pay):
     """Hero's ICM value for rows R [K,n] (stacks after the hand)."""
     p1, p2, p3 = pay
     K, n = R.shape
@@ -303,6 +303,32 @@ def icm_hero(R, h, pay):
         B *= (1.0 - np.eye(n))[None]
         v = v + p3 * sh * (a * B.sum(2)).sum(1)
     return v
+
+
+# ---- ICM for any payout list. Places 1-3: exact closed form (icm_hero_top3).
+# Places 4+: Harville's exponential-race identity (finish order = sort of Exp(1)/stack) on a fixed
+# import-time noise matrix; only the (small) tail payouts are sampled, so the error stays small.
+_ICM_M = 128
+_ICM_E = np.random.default_rng(20261109).exponential(size=(_ICM_M, 16))
+
+
+def icm_any(R, h, payouts):
+    """Hero's expected payout for post-hand stack rows R [K,n]; payouts = full config list."""
+    pays = [float(x) for x in payouts]
+    p = (pays + [0.0, 0.0, 0.0])[:3]
+    v = icm_hero_top3(R, h, (p[0], p[1], p[2]))
+    if not any(pays[3:]):
+        return v
+    K, n = R.shape
+    tail = np.zeros(n + 1)
+    m = min(n, len(pays))
+    tail[3:m] = pays[3:m]
+    S = np.where(R > 0, R, 0.0)
+    keys = _ICM_E[None, :, :n] / np.maximum(S[:, None, :], 1e-12)
+    keys[np.broadcast_to((S <= 0)[:, None, :], keys.shape)] = np.inf
+    ahead = (keys < keys[:, :, h:h + 1]).sum(2)
+    vt = tail[np.minimum(ahead, n)].mean(1)
+    return v + np.where(S[:, h] > 0, vt, 0.0)
 
 
 class Ctx:
@@ -326,6 +352,7 @@ class Ctx:
         self.eff_bb = min(mine, max(others)) / self.bb
         pay = list(state.config.payouts) + [0, 0, 0]
         self.pay = (float(pay[0]), float(pay[1]), float(pay[2]))
+        self.payouts_all = tuple(float(x) for x in state.config.payouts)
         self.payv = np.array([float(x) for x in list(state.config.payouts)[:self.n]] + [0.0] * (self.n + 1))
         v = state.variant or {}
         self.revealed = dict(v.get("revealed") or {})
@@ -335,7 +362,7 @@ class Ctx:
         return (perf_counter() - self.t0) * 1000.0 > SOFT_DEADLINE_MS
 
     def values(self, R, start):
-        v = icm_hero(R, self.me, self.pay)
+        v = icm_any(R, self.me, self.payouts_all)
         bust = R[:, self.me] <= 0
         if bust.any():
             na = (R > 0).sum(1) + ((R <= 0) & (start[None, :] > start[self.me])).sum(1)
@@ -798,6 +825,7 @@ class Agent(BaseAgent):
 
 # warm up numpy paths, then freeze import-time objects out of the GC's view
 eval_rows(np.array([[0, 5, 10, 15, 20, 25, 30]], dtype=np.int64))
-icm_hero(np.array([[100.0, 200.0, 300.0]]), 0, (50.0, 30.0, 20.0))
+icm_any(np.array([[100.0, 200.0, 300.0]]), 0, (50.0, 30.0, 20.0))
+icm_any(np.array([[100.0, 200.0, 300.0, 50.0]]), 0, (4.0, 3.0, 2.0, 1.0))
 gc.collect()
 gc.freeze()

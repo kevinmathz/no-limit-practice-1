@@ -1,8 +1,8 @@
 # kevin_v1: CFR + tournament-EV bot for keep-reveal-discard
 
-`agent.py` is **generated**. Edit the sources in `../../tmp/krd/` and rebuild:
+`agent.py` is **generated**. Edit the sources in `../train/kevin_v1_src/` and rebuild (see its README):
 ```
-cd ../tmp/krd
+cd ../train/kevin_v1_src
 python3 build_bundle.py cfr_tables.npz   # tables -> krd_tables.npz
 python3 build_agent.py                   # sources -> agent.py
 ```

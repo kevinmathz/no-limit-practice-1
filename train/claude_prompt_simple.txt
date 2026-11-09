@@ -12,6 +12,16 @@ READ FIRST (≤2 minutes, skim): the kit's README.md, RULES.md, AGENTS.md, the S
 Action, Event, Config), one example bot, and the variant spec. The kit overrides this prompt
 on limits, payouts, blinds, phases and action kinds.
 
+OFFICIAL FORMAT (rules page, 2026 regional — verify against the kit): 8 seats, 2,000 chips,
+blinds 10/20 rising every 25 hands, hand cap 200 settled by ICM (not chip rank), point split
+announced per variant (read state.config.payouts; may pay more than 3 places), one upload per
+5 minutes, the active bot is frozen when each scored tournament starts (a later upload counts
+from the next round), 1 ms per decision, files <= 100 MB, state resets per table, opponents
+anonymised, filler seats are random copies of submitted bots. Test locally with these numbers
+(hand cap 200, 25 hands per level), not the mock's defaults.
+If the repo has PLAYBOOK.md, skim its TL;DR and the kevin_v1 / kevin_v2_simple sections
+(combined team knowledge; ≤2 minutes).
+
 -----------------------------------------------------------------------------------
 HARD CONSTRAINTS
 -----------------------------------------------------------------------------------
@@ -40,8 +50,10 @@ HARD CONSTRAINTS
 -----------------------------------------------------------------------------------
 THE kevin_v1 RECIPE (what worked; build exactly these layers)
 -----------------------------------------------------------------------------------
-Results: 19.6 avg points in a 22-bot round-robin (next best 15.3); +12.6 points head-to-head
-over our best rule bot. The game is a survival/placement tournament (50/30/20, 4th–8th = 0).
+Results: kevin_v1 19.6–25 avg points in team round-robins (team rule bots ~13). This prompt was
+validated: following it from scratch (no CFR) produced kevin_v2_simple in ~8 minutes, which tied
+kevin_v1 (−0.8 ± 2.0 paired), beat the team's best v21 by +5.7 (+4.4 under the official format),
+and topped the arena at 23.4 points. Survival/placement tournament: 4th–8th usually pay 0.
 
 L1 VARIANT DECISION — balanced, not deterministic.
    Strength first (keep the option with the best hand class), then mix between near-equal
@@ -53,6 +65,11 @@ L2 TOURNAMENT VALUE (exact ICM, numpy-vectorised over outcome rows [K,n]):
      P3_i = s_i·Σ_{j≠i}Σ_{k≠i,j} s_j s_k/(T(T−s_j)(T−s_j−s_k))
      V_i = p1·P1 + p2·P2 + p3·P3 with payouts from state.config; zero stacks excluded;
      if hero busts in a row: value = payout of place (#alive after + 1).
+   ANY PAYOUT LIST (the split may change per variant): places 1-3 with the closed form above;
+     if more places pay, add the tail: draw a fixed import-time matrix E ~ Exp(1) [128, n];
+     finish order = ascending E_j / s_j (Harville's exponential race, exact in expectation);
+     hero's tail value = mean over rows of tail_payout[#players with key < hero's key]
+     (tail_payout = payouts with places 1-3 zeroed). ~0.2 ms for 14 rows; mean error ~0.1 pt.
    jam_ev: rows {fold, all fold, (win, lose) per caller in order}; at most one caller;
      EV = P(all fold)·V(win pot) + Σ reach_j·p_j·[eq_j·V(win_j) + (1−eq_j)·V(lose_j)];
      amount at risk = min(my total, caller total). call_ev: eq·V(win)+(1−eq)·V(lose) vs V(fold).
@@ -116,6 +133,7 @@ DO NOT BUILD (measured no gain or harmful in practice)
 -----------------------------------------------------------------------------------
 BUILD PLAN
 -----------------------------------------------------------------------------------
+UPLOAD RULE: at most one upload per 5 minutes; finish an upload before each round starts.
 MIN 0–5   Scaffold: helpers, try/except fallback, phase dispatch, L1 heuristic, tight preflop
           (top ~8%) + push/fold <= 12bb + value-only postflop. `check`, 50-table play, UPLOAD.
 MIN 5–15  Replace with L2–L6 in this order: L2, L4, L5 (call shading first), L3, L6.
@@ -123,11 +141,16 @@ MIN 5–15  Replace with L2–L6 in this order: L2, L4, L5 (call shading first),
           ≤ 2 s or a Chen-style score), equity matrix vs ranges if time; class id from cards.
 MIN 15–20 Gates: (1) record ~1000 real states, time act() 15x each, take the min:
           p99.8 <= 0.8 ms (else cut samples / precompute more / tighten the soft deadline);
-          (2) `check` OK and 0 failed decisions in 200 tables vs check_or_fold + examples;
+          (2) `check` OK and 0 failed decisions in 200 tables vs check_or_fold + examples
+              (and the strongest bots available), with hand cap 200 / 25 hands per level;
           (3) paired compare (same seeds, swap our seat) vs the minute-5 bot — noise is
           ±2 pts at 400 tables; (4) grep the built agent.py for a new constant to confirm
           edits landed. UPLOAD the better one. Report avg points, places, fails, timing.
 Don't benchmark timing while heavy jobs run (10+ ms preemption spikes even for trivial code).
+Also run a short "exception hunt": wrap decide() locally to log anything the fallback swallows
+(0 expected). Known weakness of this recipe: it wins ~40% of tables but places 2nd/3rd only
+~10%; if time remains AFTER the gates, the next experiment is a survival tilt when not the chip
+leader (e.g. stack-off only with QQ+/AK when short of the lead) — ship only on a paired win.
 
 (Practice example, reference only: "keep-reveal-discard" — 3 cards dealt, each player
 simultaneously keeps 1 private, reveals 1 face up, discards 1, then NLHE. kevin_v1: keep the
@@ -148,5 +171,5 @@ WORK FOLDER + WRITE SCOPE:
 <e.g. "new folder kevin_vN in the kit repo only; scratch files in /tmp">
 
 CAP SETTLEMENT (icm or rank) IF KNOWN, AND ANY CHANGED LIMITS:
-<e.g. "ICM at hand cap 250; decision_ms 1; payouts 50/30/20">
+<e.g. "ICM at hand cap 200, blinds every 25 hands; decision_ms 1; payouts per kit">
 ================================================================

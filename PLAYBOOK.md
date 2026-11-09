@@ -53,33 +53,67 @@ From a 3,000-table match (seed 191) with all 8 at one table. "Out" means finishi
 
 **Lesson:** our layers (tightness, ICM, exact folds and locks) are cheap, quick to build and worth about +5 points over naive play. **Modeling the variant's information structure** (balanced reveals, posteriors over hidden cards, exact EV in points) was worth about **+12 more**. In a new variant, find its information structure first.
 
-### The cost: hours of CFR solving. Making it fit the competition
-kevin_v1's solves took hours. The variant is only announced at the start, so the solve must be redone in about 60 minutes plus the gaps between rounds.
+### kevin_v2_simple: the same strength in about 8 minutes, without CFR
+**Correction to an earlier note:** kevin_v1's solves didn't take hours.
+- The quick CFR tables took **6 minutes** and the full ones **11 minutes** on 6 cores. The two made **no measurable difference** (paired +0.15 ± 2.6 points).
+- Most of the kevin_v1 session went into building the pipeline and finding leaks, not solving.
 
-1. **Have the pipeline ready before the event.** Make the solver general over the variant's new decision (choose phase, reveal rules) so only the game definition changes. Test it end to end on a practice variant.
-2. **Solve only what's novel and high-value:**
-   - the variant's new decision, like the choose phase;
-   - short-stack push/fold.
+To test that, `kevin_v2_simple` was built **from scratch** with `train/claude_prompt_simple.txt`: no CFR, and no code from kevin_v1 or the team bots. It was finished about 8 minutes into a 20-minute plan.
+- **Card choice:** keep the best pair and mix the reveal 50/50.
+- **Opponent ranges:** conditioned on each opponent's revealed card, with a prior simulated from that same keep/reveal rule.
+- **Everything else:** kevin_v1's recipe: exact ICM, chip-EV push/fold plus an ICM check, deep 3-bet-or-fold, postflop call shading, and the opponent model.
 
-   Reuse the fast layers (tightness, ICM, exact folds and locks, Monte Carlo equity) everywhere else.
-3. **Shrink the grid first:** fewer stack buckets (for example 5, 10, 20, 40 big blinds), player counts grouped as {2, 3, 4–5, 6–8}, coarser card classes. Refine later.
-4. **Parallelize across the grid on ORCD CPUs:**
-   - each (player count × stack) cell is an independent solve, so use a SLURM array job;
-   - 7 player counts × 8 stacks = 56 cells on 56+ cores takes the time of one cell;
-   - pure-Python CFR is CPU-bound, so cores help more than GPUs.
-5. **GPUs only for a vectorized solver:** full-width CFR on small games (push/fold, the choose phase) as tensor operations over all hands at once (torch, cupy). That's a rewrite. Worth it only if a single cell is still too slow on CPU.
-6. **Ship anytime and improve between rounds:**
-   - upload a bot with a coarse solve by about minute 30;
-   - keep solving, and swap in better tables before later rounds.
+| Arena (round-robin, 2,100 tables, `check_or_fold` at every table) | Avg points | 1st | 2nd | 3rd | Out |
+|---|---|---|---|---|---|
+| **kevin_v2_simple** | **23.4** | 42% | 7% | 3% | 48% |
+| kevin_v1 | 21.3 | 38% | 7% | 4% | 52% |
+| v21 | 13.1 | 10% | 18% | 14% | 58% |
+| v23 | 13.1 | 7% | 20% | 16% | 57% |
+| v22 | 12.4 | 7% | 18% | 18% | 57% |
+| v19 | 12.2 | 14% | 13% | 7% | 66% |
+| v13 / v10 / v18 / v12 | 10.1–10.9 | | | | |
+| check_or_fold | 4.2 | 0% | 2% | 19% | 80% |
 
-   Round weights are 1× to 6×, so **rounds 4–6 carry 71% of the score**. A solve that finishes 60–100 minutes after the build ends still counts heavily.
-7. **Use warm starts:** start each cell from the neighboring cell's or the practice variant's strategy, which converges much faster than starting cold.
+**Paired results** (1,000 tables, the same seat swapped between the two bots):
+
+| Comparison | Format | Difference (points per table) |
+|---|---|---|
+| kevin_v2_simple − its minute-5 baseline | mock | +11.7 ± 1.7 |
+| kevin_v2_simple − kevin_v1 | mock | −0.8 ± 2.0 (a tie) |
+| kevin_v2_simple − v21 | mock | +5.7 ± 1.8 |
+| kevin_v2_simple − v21 | official 200-hand cap, 25 hands per level | +4.4 ± 1.9 |
+
+**Timing:** p99.8 is 0.27–0.31 ms for kevin_v2_simple and 0.28 ms for kevin_v1, measured as the minimum of 15 runs per recorded state on a quiet machine.
+
+**What this means for contest day:**
+1. **Information modeling beats solving.** The +12-point jump over the team line comes from the recipe, not the CFR: mixed reveals, ranges conditioned on public information, exact points EV, 3-bet-or-fold, and call shading. A heuristic mixed policy for the variant's new decision was as good as CFR here.
+2. **Start from `train/claude_prompt_simple.txt`** (about 20 minutes) and upload the result. Use `train/claude_prompt_complex.txt` (about 60 minutes) only for the extras: a quick CFR (6–10 minutes, with per-cell checkpoints), a leak-diagnosis loop, and a survival tilt.
+3. **Shared weakness of both kevin bots:** they win 38–46% of tables but finish 2nd or 3rd only 7–11% of the time, against 32–38% for v21/v23. The next thing to try, accepting it only with a paired win, is a ladder-aware survival tilt when we're not the chip leader. v21's explicit QQ+/AK stack-off set is a candidate here.
+4. **If a solve is still wanted**, the earlier ideas still apply: a solver ready before the event that only needs the game definition changed, a coarse grid first, parallel cells (SLURM array on ORCD CPUs), warm starts, and swapping tables between rounds. Rounds 4–6 carry 71% of the weight. But measure first whether it beats the heuristic.
+
+**Where everything lives:**
+
+| Path | Contents |
+|---|---|
+| `kevin_v1/` | Bot (generated) |
+| `train/kevin_v1_src/` | kevin_v1 sources, solver, harness and reports; rebuilding reproduces `agent.py` byte for byte |
+| `kevin_v2_simple/` | Bot (hand-written) plus `tables.npz` |
+| `train/kevin_v2_simple_src/` | Table builder, timing bench, paired compare, exception finder |
+| `train/claude_prompt_simple.txt`, `train/claude_prompt_complex.txt` | Prompts for the contest |
 
 ### Previous top 8 (seed 161, before v21)
 v19 16.4, v13 14.7, v18 13.6, v10 13.2, v12 12.6, v20 12.4, v15 11.6, check_or_fold 5.5.
 
 ## 0. TL;DR (what actually moved the score)
 
+0. **Best line so far: the kevin recipe** (kevin_v1 / kevin_v2_simple, about 21–25 points vs about 13 for v21/v23):
+   - mixed choices so public cards don't leak;
+   - opponent ranges conditioned on what they reveal;
+   - exact tournament-points EV on every all-in;
+   - deep 3-bet-or-fold;
+   - postflop calls shaded against bettors.
+
+   It takes about 8 minutes with `train/claude_prompt_simple.txt`, and no CFR is needed. The items below are still true, and they explain why survival matters (see "kevin_v2_simple" above).
 1. **Scoring is about placing, not chips.** Payouts are 50/30/20 points for 1st/2nd/3rd and 0 for 4th–8th, averaged over thousands of 8-player tables. **Busting is the dominant loss.** A bot that only checks or folds (`check_or_fold`) beat every "smart" bot we wrote until we made them very tight. It never wins a table, but it slides into 2nd or 3rd while the others knock each other out.
 2. **Tightness gave the biggest gains, by far.** Wrapping any bot in a tightening layer gave +1.5 to +8 points: play only the top ~6–10% of hands preflop, bet two pair or better, call top pair (good kicker) or better, and add a guard against committing the stack. Do this first.
 3. **ICM-aware commits and a river "can't win" fold helped a bit.** The river check uses the variant's public information. Bet hard with a lock (a hand no unseen card can beat) and fold when the hand is drawing dead.
@@ -113,9 +147,15 @@ These come from the official docs, and our mock enforces them. Check the new kit
 
 ## 2. Format facts that drive strategy (2026 regional; verify for finals)
 
-- **Table:** 8 players, 2,000-chip stacks, blinds start 10/20 and rise every 20 hands, hand cap 250.
-- **End of table:** at the cap, the survivors split the remaining points by **ICM** on their stacks.
-- **Payouts:** 50/30/20 by default, but read `state.config.payouts`, since rounds may draw others.
+Source: the official rules page (https://pokerbot.sequoiacap.com/rules.html, checked 2026-11-09). **Our mock engine's defaults differ**: it uses 20 hands per level and a 250-hand cap. Test with the official numbers: `--hand-cap 200`, plus `hands_per_level=25` in the engine settings (`train/kevin_v2_simple_src/paired.py --hand-cap 200 --hpl 25`).
+
+- **Table:** 8 players, 2,000-chip stacks, blinds start 10/20 and rise **every 25 hands**, **hand cap 200** (§4.4).
+- **End of table:** at the cap, the survivors split the remaining points by **ICM** on their stacks, not by chip rank (§4.5). So the last hand is **not** a shove spot: under ICM a coinflip never gains points.
+- **Payouts:** the point split "may vary by poker variant" and is announced at the start of the build phase (§4.5). Read `state.config.payouts` and **handle any list**, not just top 3. Both kevin bots compute places 1–3 exactly and use Harville's exponential race on fixed samples for places 4+.
+- **Uploads:** at most one submission every **5 minutes** (§3.5). The active bot is **frozen when each scored tournament starts**, so a later upload only counts from the next round (§4.2). Space milestone uploads at least 5 minutes apart and finish one before each round starts.
+- **Fillers:** when the bot count isn't divisible by 8, random copies of submitted bots fill the empty seats (they can be copies of yours) and earn no points (§4.6).
+- **Limits:** 1 ms per decision; an error or timeout means check/fold (§3.7). Bot files up to 100 MB. Sandboxed with no network (§3.6). State resets each table and opponents are anonymised (§3.8). The rules page doesn't specify the time bank, the upload test, the memory size or the allowed imports, so follow the kit's README/AGENTS.
+- **Conduct:** no AI makes live decisions (§7). Copying another team's code means disqualification (§6.1). The variant stays confidential until the event ends, and the finals use a different variant (§3.2, §5.2, §6.4). Disputes must be raised before the next round, or within 5 minutes of the T6 results (§6.3).
 - **Busting together:** when several players bust in the same hand, the one with more chips at the start of the hand places higher.
 - **Scoring:** each round's score is average points per table over at least 5,000 tables. There are 6 scored rounds with weights 1×–6×, 20 minutes apart. The first 60 minutes are build time.
 - **Read `state.config`** and never hard-code: decision_ms, time_bank_ms, memory_bytes, the blinds schedule, hand_cap, payouts.

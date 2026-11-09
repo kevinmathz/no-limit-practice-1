@@ -5,15 +5,28 @@ ROLE AND GOAL
 Build a tournament poker bot FROM SCRATCH for the Sequoia "No Limit" bot tournament, using the
 official starter kit linked at the bottom, for the variant described at the bottom.
 You have ~60 minutes and up to 5 parallel subagents. Rebuild the full recipe of our best
-practice bot (kevin_v1: 19.6 avg points in a 22-bot round-robin vs 15.3 for the next best;
-+12.6 points head-to-head over our best rule bot), adapted to the new variant. Skip everything
-under DO NOT BUILD. Always have a safe bot uploaded: milestone uploads at ~10, ~35, ~55 min.
+practice bots (kevin_v1 and kevin_v2_simple: 21–25 avg points in team round-robins vs ~13 for
+the team's rule bots; kevin_v2_simple, built in ~8 min from the SIMPLE prompt without CFR, tied
+kevin_v1), adapted to the new variant. Skip everything under DO NOT BUILD. The CFR solve (A2) is
+an add-on that must beat the heuristic in a paired test to ship. Always have a safe bot
+uploaded: milestone uploads at ~10, ~30, ~50 min (≥ 5 minutes apart: one upload per 5 min, and
+the active bot is frozen when each scored round starts).
 Tell me before any step that takes 5+ minutes; no single step over ~20 minutes; run long jobs
 in the background and keep building.
 
 READ FIRST (≤3 minutes): kit README.md, RULES.md, AGENTS.md, the SDK (State/Action/Event/
 Config), an example bot, the engine's table/showdown code (exact events and state fields),
 and the variant spec. The kit overrides this prompt on any conflict.
+
+OFFICIAL FORMAT (rules page, 2026 regional — verify against the kit): 8 seats, 2,000 chips,
+blinds 10/20 rising every 25 hands, hand cap 200 settled by ICM (not chip rank), point split
+announced per variant (read state.config.payouts; may pay more than 3 places), one upload per
+5 minutes, the active bot is frozen when each scored tournament starts (a later upload counts
+from the next round), 1 ms per decision, files <= 100 MB, state resets per table, opponents
+anonymised, filler seats are random copies of submitted bots. Test locally with these numbers
+(hand cap 200, 25 hands per level), not the mock's defaults.
+If the repo has PLAYBOOK.md, skim its TL;DR and the kevin_v1 / kevin_v2_simple sections
+(combined team knowledge; ≤2 minutes).
 
 -----------------------------------------------------------------------------------
 HARD CONSTRAINTS (every agent, every file)
@@ -51,7 +64,9 @@ The game is a survival/placement tournament (50/30/20, 4th–8th = 0).
 L1 VARIANT DECISION: equilibrium mixed policy from a QUICK solve (A2) over canonical
    (suit-isomorphic) classes, sampled with random.random(); heuristic mixed policy if A2
    isn't ready. Never let public info be a deterministic function of private info.
-L2 TOURNAMENT VALUE (A3): exact top-3 Malmuth–Harville ICM vectorised over outcome rows;
+L2 TOURNAMENT VALUE (A3): Malmuth–Harville ICM vectorised over outcome rows — places 1-3 in
+   closed form, places 4+ (if the split pays them) via the exponential race on a fixed
+   Exp(1) matrix (finish order = ascending E_j/s_j; sample only the tail payouts);
    hero-only fast path; busted hero = place payout; jam_ev / call_ev / risk_premium; plain
    ICM at every horizon; exact rank settlement on the last hand only if the cap pays by rank.
 L3 SHORT STACK <= 25bb: push/fold chart from A2 (keyed by position, our class, which card we
@@ -116,7 +131,8 @@ A2 QUICK SOLVER (skip if the variant adds no decision): mini-batch Monte Carlo C
    in expectation. Grid players 2..8 × stacks {3,5,8,12,17,25,40}bb, ~35–45 s per cell,
    6 workers, save each cell on completion (imap_unordered), finished in ≤ 10 minutes.
    Outputs: choose policy, pf_open, pf_call (uint8 ×255), posterior[cell, public_rank, 169].
-A3 TOURNAMENT VALUE: icm_batch exact vs the engine icm() to 1e-9; hero fast path;
+A3 TOURNAMENT VALUE: icm_batch exact vs the engine icm() to 1e-9 for 3 paid places, and the
+   any-payout tail method above (test vs engine icm() with linear 8..1 payouts); hero fast path;
    value_rows with place payouts and same-hand bust ordering; jam_ev, call_ev, risk_premium;
    cap modes icm|rank (rank: exact settlement on the last hand only); unit tests.
 A4 HARNESS + OPPONENTS: opponents (tight bot showing low / high / random public info, jammer,
@@ -138,8 +154,11 @@ MIN 35–55 — ME: FIX LEAKS BY MEASUREMENT ONLY
   tables (noise ±2 pts at 400–1000); keep only significant wins; snapshot builds/vN/.
 - If the cap pays by rank: add last-hand rank routing and A/B it with --hand-cap 60.
 - Only if everything passes and ≥ 10 minutes remain, one untested experiment: a survival
-  tilt when not the chip leader (kevin_v1 won 35% of tables but placed 2nd/3rd only 9%).
-  Ship it only if it wins a paired test.
+  tilt when not the chip leader (the kevin bots win ~40% of tables but place 2nd/3rd only
+  ~10%, vs ~33% for the team's tight bots; candidate: v21's explicit QQ+/AK stack-off set when
+  short of the lead). Ship it only if it wins a paired test.
+- Test everything with the official format (hand cap 200, 25 hands per level) and, if the
+  announced split pays 4+ places, with that payout list.
 
 MIN 55–60 — FINAL: `check` OK; 0 failed decisions in 200 tables; true-cost p99.8 <= 0.8 ms;
   beats the previous upload in a paired test (else keep the previous). UPLOAD.
@@ -179,5 +198,5 @@ WORK FOLDER + WRITE SCOPE:
 <e.g. "new folder kevin_vN in the kit repo; scratch in documents/tmp/<name>; nothing else">
 
 CAP SETTLEMENT (icm or rank) IF KNOWN, AND ANY CHANGED LIMITS:
-<e.g. "ICM at hand cap 250; decision_ms 1; payouts 50/30/20; cores available: 8">
+<e.g. "ICM at hand cap 200, blinds every 25 hands; decision_ms 1; payouts per kit; cores: 8">
 ================================================================
