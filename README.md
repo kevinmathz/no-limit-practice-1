@@ -37,3 +37,5 @@ The real kit has `agent.py` at its root. Here the bot lives in `bot/`, so `pack`
 - Push straight to `main` in small commits, and pull before you start.
 - One person owns `bot/agent.py`. The other works on tests, opponents and analysis.
 - Before every commit, run `check` and a 200-table `play`. You need **0 failed decisions** and a p99 well under 1 ms.
+
+<!-- smoke test: commit identity -->
