@@ -19,8 +19,9 @@ from .cards import DECK, best_hand
 DEFAULTS = dict(
     variant="keep-reveal-discard",  # or "reference-holdem"
     starting_stack=2000,
-    blinds=((10, 20), (15, 30), (25, 50), (50, 100), (75, 150), (100, 200),
-            (150, 300), (200, 400), (300, 600), (400, 800), (600, 1200), (1000, 2000)),
+    # official: start 10/20, up every 20 hands. Later levels are our guess: gentle, ~+20-25% per level
+    blinds=((10, 20), (15, 30), (20, 40), (25, 50), (30, 60), (40, 80), (50, 100),
+            (60, 120), (75, 150), (90, 180), (100, 200), (125, 250), (150, 300)),
     hands_per_level=20,
     hand_cap=250,
     payouts=(50, 30, 20),

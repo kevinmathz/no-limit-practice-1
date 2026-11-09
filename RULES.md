@@ -14,7 +14,7 @@ The real variant will be announced at the event. The defaults below are **our gu
 
 ## Format (from the official Format page)
 
-- 8 players per table. Starting stack 2,000. Blinds start 10/20 and rise every 20 hands (later levels are our guess). Hand cap 250.
+- 8 players per table. Starting stack 2,000. Blinds start 10/20 and rise every 20 hands. Later levels are our guess, gentle: 15/30, 20/40, 25/50, 30/60, 40/80, 50/100, 60/120, 75/150, 90/180, 100/200, 125/250, 150/300. Hand cap 250.
 - A table ends when one bot holds every chip or the hand cap is reached; at the cap, survivors split remaining points by ICM.
 - Payouts 50/30/20 for 1st/2nd/3rd, 0 for 4th-8th. Multiple busts in one hand: more chips at the start of the hand places higher.
 - Round score = average points per table (5,000+ tables per round). 6 scored rounds, 20 min apart, weights 1x-6x. Build phase: 60 min after the variant is announced.
