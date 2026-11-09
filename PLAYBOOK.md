@@ -139,7 +139,16 @@ act(state):
 
 Use the same pattern for any constant: thresholds, ICM margins, the aggression window. **It is optimal only against the field it was trained on.** Keep the field diverse (your best bots, a CFR bot and `check_or_fold`), and accept a change only if it wins on fresh seeds.
 
-(Results are appended in §9.)
+**Result:** after 4 generations in 7 minutes, the learned multipliers were:
+
+| Players remaining | 8 | 7 | 6 | 5 | 4 | 3 | 2 |
+|---|---|---|---|---|---|---|---|
+| Multiplier | 0.74 | 0.37 | 1.58 | 1.41 | 2.08 | 0.69 | 3.34 |
+
+- **Pattern:** tight at 7–8 players, looser at 4–6 (steal blinds while others are scared of the bubble), tight at 3, very loose heads-up.
+- This is roughly the **opposite** of our hand-picked schedules (v14–v17), which explains why those lost.
+- **Validation** on the same 4,000 seeds: 13.91 vs 12.63 for v12's flat schedule.
+- **Fresh seed, top-bot field:** v18 14.2 vs v12 12.7.
 
 ---
 
@@ -206,9 +215,9 @@ All bots are in `pokerbot-practice/`. "Pts" is average points per table in the l
 | v15 | v13 | Smooth schedule + doubled ICM margin on the bubble | 12.6–12.9 | About even with v13. |
 | v16 | v10 | Step schedule | 12.8–14.5 | Slightly worse than v10. |
 | v17 | v10 | Smooth schedule | 13.1–14.9 | About even with v10. |
-| v18 | v12 | Looseness multiplier per player count, **learned** by a cross-entropy search over simulation | see §9 | See §9. |
+| **v18** | v12 | Looseness multiplier per player count, **learned** by a cross-entropy search over simulation (tight at 7–8 players, loose at 4–6, very loose heads-up) | **14.2** in the top-bot field, 1.5 above v12 | **Best of the v10/v12 line.** The learned schedule beat every hand-picked one. |
 
-**Best bots: v12 first, then v10.** Both come from the CFR line, but the tightness, ICM and lock layers do most of the work.
+**Best bots depend on the field.** Fields with spewy or loose bots favour the survival line: v18, then v12 and v10. Fields of strong, tight bots favour v13 (16.6 points, 27% 1st), because once nobody spews, **winning tables matters more than surviving**. Submit the line that wins in the field you expect, or blend the two. Both come from the CFR line, but the tightness, ICM and lock layers do most of the work.
 
 ---
 
@@ -216,6 +225,11 @@ All bots are in `pokerbot-practice/`. "Pts" is average points per table in the l
 
 All runs are 8-seat sit-and-gos. "Out" means finishing 4th–8th.
 
+0. **Top-bot field, 3,000 tables (seed 141):**
+   - Field: v18, v12, v10, v13, v17, v15, v16 and check_or_fold.
+   - Results: **v13 16.6 (1st 27%)**, v18 14.2, v15 14.2, v10 13.1, v12 12.7, v16 12.7, v17 11.8, check_or_fold 4.6.
+   - In a field with no spewy bots, check_or_fold collapses and the aggressive tight bots win.
+   - 0–6 timeouts per bot came from rare decisions over 100 ms, most likely Windows hiccups.
 1. **v12 ×7 vs check_or_fold, 2,000 tables (gentle blinds):** v12 13.7 per seat (1st 14%, out 60%); check_or_fold 4.3 (3rd 21%, out 79%).
 2. **Round-robin, 4,000 tables, check_or_fold plus 7 random from the pool (seed 121):**
    - v12 15.2, v17 14.9, v10 14.8, v16 14.5, v13 13.9, v14 13.0, check_or_fold 12.8, v15 12.6, v11 11.1, v9 10.5, v8 10.4, v7 9.7, v0 9.0.
@@ -252,14 +266,15 @@ All runs are 8-seat sit-and-gos. "Out" means finishing 4th–8th.
    - Prune actions under 8%.
    - Train on point utility if you can.
    - It needs much more compute than a 60-minute build window allows unless the abstraction is tiny.
-6. **Distrust theory that assumes balanced opponents** (MDF, GTO defense). Measure against the real field.
-7. **Tune constants by search, not by hand.** Hand-picked schedules (v14–v17) lost. Use the cross-entropy method with common random seeds, then validate on fresh seeds.
-8. **Engineering first:**
+6. **Rankings depend on the field.** Against spewy fields, survival (v12/v18) wins. Against tight, strong fields, table-winning aggression (v13) wins. Test against several fields and against the real opponents' hand histories after round 1.
+7. **Distrust theory that assumes balanced opponents** (MDF, GTO defense). Measure against the real field.
+8. **Tune constants by search, not by hand.** Hand-picked schedules (v14–v17) lost. Use the cross-entropy method with common random seeds, then validate on fresh seeds.
+9. **Engineering first:**
    - legal-action helpers and `try/except` fallbacks;
    - per-table memory only;
    - p99 under 0.2 ms;
    - self-contained bot folders;
    - module isolation in the local harness;
    - 0 failed decisions before every upload.
-9. **Use a parallel, time-boxed workflow.** One agent per bot version, a 10-minute cap, a single round-robin to decide, and a commit after each milestone.
-10. **The official kit's README, RULES and AGENTS override this playbook.** Re-check limits, payouts, blinds and the variant's new phases and actions before reusing any code here.
+10. **Use a parallel, time-boxed workflow.** One agent per bot version, a 10-minute cap, a single round-robin to decide, and a commit after each milestone.
+11. **The official kit's README, RULES and AGENTS override this playbook.** Re-check limits, payouts, blinds and the variant's new phases and actions before reusing any code here.
