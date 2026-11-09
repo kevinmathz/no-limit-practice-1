@@ -294,5 +294,5 @@ All runs are 8-seat sit-and-gos. "Out" means finishing 4th–8th.
    - self-contained bot folders;
    - module isolation in the local harness;
    - 0 failed decisions before every upload.
-10. **Use a parallel, time-boxed workflow.** One agent per bot version, a 10-minute cap, a single round-robin to decide, and a commit after each milestone.
+10. **Use a parallel, time-boxed workflow.** One agent per bot version, an up-front time estimate (ask the user at 5+ minutes, nothing over ~30), a single round-robin to decide, and a commit after each milestone.
 11. **The official kit's README, RULES and AGENTS override this playbook.** Re-check limits, payouts, blinds and the variant's new phases and actions before reusing any code here.
