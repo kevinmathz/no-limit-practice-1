@@ -350,9 +350,11 @@ class Table:
         fallback = ("check", None) if any(a.kind == "check" for a in la) else ("fold", None)
         state = self.build_state(i, la, current)
         action = self.ask(i, state)
-        if action is None:
-            return fallback
-        return self.validate(i, la, action, fallback)
+        out = fallback if action is None else self.validate(i, la, action, fallback)
+        rec = getattr(self.players[i].stats, "mdf_record", None)
+        if rec is not None and state.to_call > 0:  # optional MDF tracking hook (poker_agent.py Stats)
+            rec(state.pot, state.to_call, out[0] in ("call", "raise"))
+        return out
 
     def validate(self, i, la, action, fallback):
         st = self.players[i].stats

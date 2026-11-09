@@ -33,13 +33,21 @@ python poker_agent.py pack v0 out.zip
 | `v2/` | v1 plus a river guaranteed-loss fold (`showdown.py`) and an ICM layer (`icm.py`). The ICM layer vetoes stack-risking commits unless they gain expected points, and plays aggressively in the last 25 hands when not the chip leader. |
 | `v3/` | v0 plus the same river fold and ICM layer. |
 | `v4/` | v2 with every policy action under 8% removed and the rest renormalized. |
+| `v5/` | v1 with raise sizes by pot fraction (1/3, 2/3, 1, 1.5, 2.5 pot, all-in), each with its own frequency. Undertrained: 4.7M iterations. Retrain with `CFR_BOT=v5 python train/mccfr.py --minutes N`. |
+| `v6/` | v3 plus a minimum-defense-frequency floor (`mdf.py`: defend the strongest MDF share of the range against a bet) and a bluff cap. |
 
-Results of v0-v3 over 2,000 8-seat tables (seed 21). "Out of money" means finishing 4th-8th.
+Results of all bots plus check_or_fold over 2,000 8-seat tables (seed 41). "Out of money" means finishing 4th-8th. "Overfold" is the mean shortfall of the continue rate below MDF; `play` now reports it for every seat.
 
-| Field | v3 | v0 | v2 | v1 |
+| Bot | Avg points | 1st | Out of money | Overfold |
 | --- | --- | --- | --- | --- |
-| 2 each of v0-v3 | **20.8** (1st 0%, out of money 16%) | 14.1 (27%, 71%) | 8.9 (11%, 76%) | 6.2 (11%, 87%) |
-| v0-v3 + 4 example bots | **24.1** (3%, 10%) | 22.2 (43%, 55%) | 12.2 (17%, 69%) | 9.9 (19%, 79%) |
+| check_or_fold | 26.7 | 0% | 0% | 0.52 |
+| v3 | 15.0 | 23% | 63% | 0.21 |
+| v0 | 13.6 | 24% | 69% | 0.18 |
+| v4 | 11.3 | 10% | 63% | 0.22 |
+| v2 | 10.8 | 8% | 63% | 0.23 |
+| v6 | 10.6 | 18% | 75% | 0.12 |
+| v5 | 6.3 | 10% | 83% | 0.20 |
+| v1 | 5.6 | 7% | 84% | 0.17 |
 
 ## Moving to the real kit
 

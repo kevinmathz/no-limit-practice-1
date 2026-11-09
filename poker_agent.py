@@ -129,6 +129,31 @@ class Stats:
         self.times = []
         self.notes = set()
 
+    MDF_BINS = (("<=1/3", 1 / 3), ("<=2/3", 2 / 3), ("<=1x", 1.0), (">1x", float("inf")))
+
+    def mdf_record(self, pot, to_call, continued):
+        """Facing a bet: MDF = P/(P+B), B = to_call, P = pot before the bet = pot - to_call."""
+        if not hasattr(self, "mdf"):
+            self.mdf = {}
+            self.overfold = []
+        before = max(pot - to_call, 1)
+        m = (pot - to_call) / max(pot, 1)
+        frac = to_call / before
+        b = next(name for name, hi in self.MDF_BINS if frac <= hi)
+        a = self.mdf.setdefault(b, [0, 0.0, 0])
+        a[0] += 1
+        a[1] += m
+        a[2] += int(continued)
+        self.overfold.append(max(0.0, m - int(continued)))
+
+    def mdf_report(self):
+        d = getattr(self, "mdf", {})
+        bins = {name: {"n": d[name][0], "mdf": round(d[name][1] / d[name][0], 3),
+                       "continue": round(d[name][2] / d[name][0], 3)}
+                for name, _ in self.MDF_BINS if name in d}
+        of = getattr(self, "overfold", [])
+        return bins, round(sum(of) / len(of), 4) if of else 0.0
+
     def fail(self, kind, msg):
         self.failed[kind] += 1
         if len(self.errors) < 5:
@@ -143,7 +168,18 @@ def load_agent_class(folder: str):
     if path not in _modules:
         spec = importlib.util.spec_from_file_location(f"bot_{len(_modules)}", path)
         mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)  # "import once", like production
+        # each bot runs in its own process in production; isolate bot-local modules
+        # (abstraction, icm, showdown, ...) so bots with same-named helpers don't share them
+        local = {f.stem for f in path.parent.glob("*.py")} - {"agent"}
+        for name in local:
+            sys.modules.pop(name, None)
+        sys.path.insert(0, str(path.parent))
+        try:
+            spec.loader.exec_module(mod)  # "import once", like production
+        finally:
+            sys.path.remove(str(path.parent))
+            for name in local:
+                sys.modules.pop(name, None)
         _modules[path] = mod
     return _modules[path].Agent
 
@@ -182,6 +218,8 @@ def play(folders, tables, seed, settings):
             "act_ms_p50": round(ts[len(ts) // 2], 4),
             "act_ms_p99": round(ts[min(len(ts) - 1, int(len(ts) * 0.99))], 4),
             "act_ms_max": round(ts[-1], 4),
+            "mdf": stats[k].mdf_report()[0],
+            "overfold": stats[k].mdf_report()[1],
             "sample_errors": stats[k].errors,
             "notes": sorted(stats[k].notes),
         })
