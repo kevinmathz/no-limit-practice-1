@@ -217,6 +217,10 @@ All bots are in `pokerbot-practice/`. "Pts" is average points per table in the l
 | v17 | v10 | Smooth schedule | 13.1–14.9 | About even with v10. |
 | **v18** | v12 | Looseness multiplier per player count, **learned** by a cross-entropy search over simulation (tight at 7–8 players, loose at 4–6, very loose heads-up) | **14.2** in the top-bot field, 1.5 above v12 | **Best of the v10/v12 line.** The learned schedule beat every hand-picked one. |
 
+**Lineages:**
+- **CFR line:** v1 (MCCFR policy) → v2 (+ river fold + ICM) → v4 (prune actions under 8%) → v10 (+ tight) → v12 (tighter + top-of-range + lock) → v18 (+ learned players-remaining schedule).
+- **Rule line:** v0 (rule bot) → v3 (+ river fold + ICM) → v9 (+ tight) → v13 (tighter + top-of-range + lock) → v14/v15 (+ hand-picked schedules).
+
 **Best bots depend on the field.** Fields with spewy or loose bots favour the survival line: v18, then v12 and v10. Fields of strong, tight bots favour v13 (16.6 points, 27% 1st), because once nobody spews, **winning tables matters more than surviving**. Submit the line that wins in the field you expect, or blend the two. Both come from the CFR line, but the tightness, ICM and lock layers do most of the work.
 
 ---
