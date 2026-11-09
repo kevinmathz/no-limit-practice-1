@@ -20,22 +20,26 @@ The build window is short: 60 minutes, then scored rounds every 20 minutes with 
 
 ## Top 8 bots (latest)
 
-From a 3,000-table match (seed 161) with all 8 at one table. "Out" means finishing 4th–8th.
+From a 3,000-table match (seed 171) with all 8 at one table. "Out" means finishing 4th–8th.
 
-| Rank | Bot | Lineage | Avg points | 1st | 2nd | 3rd | Out | p99 ms |
-|---|---|---|---|---|---|---|---|---|
-| 1 | **v19** | v13 + learned players-remaining schedule | **16.4** | 26% | 9% | 6% | 59% | 0.17 |
-| 2 | v13 | rule line: v0 + ICM + river fold + tight + lock | 14.7 | 24% | 8% | 4% | 64% | 0.16 |
-| 3 | v18 | v12 + learned schedule | 13.6 | 8% | 20% | 16% | 55% | 0.07 |
-| 4 | v10 | CFR line: v1 + ICM + river fold + prune + tight | 13.2 | 8% | 19% | 16% | 57% | 0.07 |
-| 5 | v12 | v10 tighter + top-of-range + lock | 12.6 | 8% | 17% | 17% | 58% | 0.07 |
-| 6 | v20 | v10 + learned schedule (only 3 search generations) | 12.4 | 8% | 18% | 14% | 60% | 0.07 |
-| 7 | v15 | v13 + smooth hand-picked schedule | 11.6 | 18% | 6% | 4% | 71% | 0.19 |
-| 8 | check_or_fold | baseline | 5.5 | 0% | 3% | 24% | 74% | 0.00 |
+| Rank | Bot | Lineage | Avg points | 1st | 2nd | 3rd | Out |
+|---|---|---|---|---|---|---|---|
+| 1 | **v21** | v19, with deep preflop stack-offs only with QQ+/AK | **17.2** | 21% | 15% | 10% | 53% |
+| 2 | v22 | v19, with stack-offs only with KK+ | 15.7 | 15% | 18% | 14% | 53% |
+| 3 | v19 | v13 + learned players-remaining schedule | 15.5 | 23% | 10% | 6% | 61% |
+| 4 | v13 | rule line: v0 + ICM + river fold + tight + lock | 13.0 | 21% | 8% | 4% | 68% |
+| 5 | v18 | v12 + learned schedule | 11.5 | 7% | 15% | 16% | 62% |
+| 6 | v12 | CFR line, tight + lock | 11.4 | 6% | 16% | 15% | 62% |
+| 7 | v10 | CFR line, tight | 11.1 | 7% | 16% | 13% | 64% |
+| 8 | check_or_fold | baseline | 4.7 | 0% | 2% | 20% | 78% |
 
-- The **learned schedule helped the rule line a lot** (v13 14.7 → v19 16.4) and **v12** (12.6 → v18 13.6), but not **v10** (v20). v20's search was probably too short.
-- 0–6 failed decisions per bot over 3,000 tables, all rare decisions over 100 ms. That's most likely Windows CPU spikes. Check on Linux.
-- **Recommended submission: v19.** Its learned schedule was tight with 6–7 players left (0.3–0.5×), loose with 4 left (1.6×) and very loose heads-up (2.7×).
+- **Fixing the stack-off leak gave +1.7 points (v19 → v21).** v19's "premium" range was the top 4% of hands by equity against a random hand, which ranks 99–77 above AK. A sampled hand showed v19 putting 86 big blinds in with 99 against QQ. **Use an explicit hand set for stack-offs, not an equity percentile.**
+- **v23** (v21 with late-game aggression off) scored 16.7 against v21's 16.9 in a separate 3,000-table run (seed 181), the same within noise. See §4.2.
+- **Timeouts:** 3–10 per bot over 3,000 tables, all single decisions of 100–130 ms that exhausted the time bank. They are most likely Windows CPU spikes. Check on Linux.
+- **Recommended submission: v21,** or v23 for simpler logic near the cap.
+
+### Previous top 8 (seed 161, before v21)
+v19 16.4, v13 14.7, v18 13.6, v10 13.2, v12 12.6, v20 12.4, v15 11.6, check_or_fold 5.5.
 
 ## 0. TL;DR (what actually moved the score)
 
@@ -130,6 +134,7 @@ act(state):
   - p is raised to the power `1 + 0.8·(opponents−1)`, then shaded down further when facing a bet.
 - **Bust-aversion margin, in points:** 1.5 with 4–5 players left, 0.8 with 3 or 6, 0.4 with 7–8, and 0 heads-up.
 - **Late-game aggression:** in the last 25 hands before the cap, when not the chip leader, the margin is 0 and play widens. The chip leader near the cap plays tighter.
+- **Correction: late-game aggression isn't needed.** At the hand cap, points are split by ICM on stacks. A short stack that survives already gets its ICM share, and gambling to catch up is negative in expected points because ICM is concave. With the gentle blinds, **72% of tables reach the 250-hand cap** (median final hand 250), so this matters. v23 (v21 with aggression off) scored 16.7 against v21's 16.9 over 3,000 tables, the same within noise. **Default: no late-game aggression.** Keep the plain ICM veto all the way to the cap.
 - **Effect:** about −7 percentage points in the bust rate against v0 alone, and +1.3 points head-to-head.
 
 ### 4.3 Public-information checks (variant-specific; ours revealed one hole card)
@@ -321,7 +326,9 @@ All runs are 8-seat sit-and-gos. "Out" means finishing 4th–8th.
 ## 13. Final thoughts: v19 and the path that led to it
 
 ### What v19 is
-v19 is our best bot: 16.4–17.0 points in top-bot fields, wins 26% of tables, p99 0.17 ms. It's a **rule-based** bot with five layers stacked on top. It has no CFR policy.
+(Update: **v21** = v19 with stack-offs limited to QQ+/AK is now best at 17.2. Everything below still applies.)
+
+v19 was our best bot: 16.4–17.0 points in top-bot fields, wins 26% of tables, p99 0.17 ms. It's a **rule-based** bot with five layers stacked on top. It has no CFR policy.
 
 1. **Base (v0):** a rule bot.
    - Preflop: a hand score from high card, kicker, suitedness and connectedness, with push/fold at 12 big blinds or less.
