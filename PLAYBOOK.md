@@ -315,3 +315,59 @@ All runs are 8-seat sit-and-gos. "Out" means finishing 4th–8th.
    - 0 failed decisions before every upload.
 10. **Use a parallel, time-boxed workflow.** One agent per bot version, an up-front time estimate (ask the user at 5+ minutes, nothing over ~30), a single round-robin to decide, and a commit after each milestone.
 11. **The official kit's README, RULES and AGENTS override this playbook.** Re-check limits, payouts, blinds and the variant's new phases and actions before reusing any code here.
+
+---
+
+## 13. Final thoughts: v19 and the path that led to it
+
+### What v19 is
+v19 is our best bot: 16.4–17.0 points in top-bot fields, wins 26% of tables, p99 0.17 ms. It's a **rule-based** bot with five layers stacked on top. It has no CFR policy.
+
+1. **Base (v0):** a rule bot.
+   - Preflop: a hand score from high card, kicker, suitedness and connectedness, with push/fold at 12 big blinds or less.
+   - Postflop: made-hand categories.
+   - Choose phase: keep the best 2 of 3 cards and reveal the weaker one.
+2. **Safety (v3):**
+   - Malmuth-Harville ICM veto on every commitment that risks the stack (`icm.py`).
+   - Late-game aggression when not the chip leader near the hand cap.
+   - River guaranteed-loss fold from opponents' revealed cards (`showdown.py`).
+3. **Tightness (v9):** `tight.py`, with a premium-only preflop range, value-only postflop play and a stack-off guard.
+4. **Tighter, plus exact edges (v13):**
+   - preflop top 6%, bet two pair or better, call top pair (good kicker) or better;
+   - continue facing a bet only with the top `min(MDF, 30%)` of range;
+   - `lock.py`: when no unseen card lets anyone beat us, bet about pot (0.95× pot on the river, skipping every filter).
+5. **Learned schedule (v19):** a looseness multiplier for each number of players remaining, found by a 7-minute cross-entropy search over simulated tables (`train/learn_schedule.py`, 3 generations):
+
+| Players remaining | 8 | 7 | 6 | 5 | 4 | 3 | 2 |
+|---|---|---|---|---|---|---|---|
+| Multiplier on the preflop range and TOP_CONT | 0.75 | 0.32 | 0.46 | 1.18 | 1.59 | 0.96 | 2.74 |
+
+In words: **very tight while 6–7 players remain** (let the others bust each other), **open up near the bubble with 4–5 left** (steal from players scared of busting), stay about normal at 3, and **play very loose heads-up**.
+
+### The path that led to it, and what each step taught us
+
+| Step | Result | Lesson |
+|---|---|---|
+| v0 rule bot vs v1 heads-up MCCFR | v0 won | A heads-up CFR abstraction misplays 8-max. Simple rules are a strong start. |
+| `check_or_fold` beat everything | 20–27 points with 0% wins | **This is a survival tournament.** Busting is the main loss. |
+| v1 bust analysis | 86% bust, half by hand 6 | The losses came from early stack-offs and low-probability actions. |
+| ICM + river fold (v2/v3) | small gains | Necessary, but not enough alone. |
+| MDF defending (v6/v7) | worse | Theory that assumes balanced opponents hurts against a passive field. |
+| **Tight layer (v8–v11)** | **+1.5 to +8 points** | **The biggest single win.** |
+| Tighter + lock (v12/v13) | beat check_or_fold | Exact public-information edges are cheap and safe. |
+| Hand-picked schedules (v14–v17) | no gain | Intuition about the bubble was wrong. |
+| **Learned schedules (v18/v19)** | **+1 to +1.7 points** | **Search beats intuition.** The learned shape was the opposite of our guess. |
+| Fields without spewy bots | check_or_fold collapses to about 5; v13/v19 win | Rankings depend on the field. Table-winning aggression matters once nobody gives chips away. |
+
+### What to do first on a new variant (about 60 minutes)
+1. **Minutes 0–10:** scaffold the bot, the baselines (`check_or_fold` first) and the harness. Upload a safe, tight bot.
+2. **Minutes 10–25:** port v19's layers. Rewrite the variant-specific parts: card buckets and equity tables, the choose or other new phases, and the public-information checks (provable loss and provable lock). Keep ICM and the tight layer as they are.
+3. **Minutes 25–40:** run the cross-entropy search over the tight constants and the players-remaining schedule on 16 cores. Tell the user the time estimate first.
+4. **Minutes 40–60:** run a round-robin against `check_or_fold`, a spewy field and a tight field. Upload the winner. After round 1, read the hand histories to see which kind of field we're in, then pick the survival line (v18-style) or the winning line (v19-style).
+
+### Open ideas we didn't have time for
+- **Longer schedule searches:** run 10+ generations, and also learn the ICM margins and the aggression window. Each search had only 3–4 generations.
+- **v20 (the CFR line with a learned schedule):** rerun on uncontended cores.
+- **Opponent modeling within a table, using `memory`:** track each seat's VPIP and aggression and loosen against nits.
+- **Use opponents' revealed cards in equity estimates:** today we use them only for the exact lock and fold checks.
+- **Retrain CFR on point (ICM) utility** with multi-way context.
