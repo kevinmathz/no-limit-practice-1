@@ -124,6 +124,25 @@ class Agent(BaseAgent):
         return action, out
 
     def decide(self, state):
+        if state.phase == "choose":
+            return self.choose(state)
+        if state.phase != "betting":  # unknown phase: automatic choice
+            first = state.legal_actions[0]
+            return Action(first.kind, first.min_amount)
+        return self.bet(state)
+
+    def choose(self, state):
+        """Keep-reveal-discard: keep the best 2-card combo; reveal the weaker card of it.
+        TODO: smarter reveal (bluff/ICM), use opponents' reveals once known."""
+        c = state.cards
+        best = max(((a, b) for a in range(3) for b in range(a + 1, 3)),
+                   key=lambda p: preflop_score((c[p[0]], c[p[1]])))
+        a, b = best
+        if RANK[c[a][0]] >= RANK[c[b][0]]:
+            return Action.choose(keep=a, reveal=b)
+        return Action.choose(keep=b, reveal=a)
+
+    def bet(self, state):
         bb = state.blinds[1]
         me = next(s for s in state.seats if s.seat == state.seat)
         eff_bb = (me.stack + me.bet) / max(bb, 1)

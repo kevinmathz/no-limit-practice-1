@@ -1,10 +1,20 @@
-# Rules (mock: reference no-limit hold'em)
+# Rules (practice variant: keep-reveal-discard)
+
+## Keep-reveal-discard (default variant; `--variant reference-holdem` for plain hold'em)
+
+1. Blinds are posted, then each player is dealt **3 cards**.
+2. **Choose phase** (`state.phase == "choose"`, only legal action `choose`): every player picks one card to **keep** (private), one to **reveal** (public), one to **discard** (hidden, out of play). Choices are simultaneous: nobody sees others' reveals until all have chosen.
+   - Return `Action.choose(keep, reveal)`; each is a card string (`"As"`) or an index 0-2 into `state.cards`.
+   - `Action("choose")` (or a failed decision) takes the automatic choice: keep card 0, reveal card 1, discard card 2.
+3. Reveals arrive as `reveal` events (`seat`, `cards=(card,)`), and in `state.variant`: `{"revealed": {seat: card}, "my_reveal": card, "my_discard": card}`. `seats[*].shown_cards` holds the revealed card.
+4. Play continues as normal no-limit hold'em with your 2 cards (kept + revealed): preflop betting, flop, turn, river, showdown.
+
 
 The real variant will be announced at the event. The defaults below are **our guesses**. Bots should always read `state.config` and never hard-code these values.
 
 ## Format
 
-- Sit-and-go tables of 2 to 10 seats. A round uses 8 seats, and the docs' example uses 3.
+- Sit-and-go tables of 2 to 8 seats.
 - Everyone starts with 1,500 chips. Blinds rise every 10 hands: 10/20, 15/30, 25/50, 50/100 and so on (see `sdk/poker_engine/table.py`).
 - The hand cap is 150. If the table reaches it, the remaining players are scored by ICM on their stacks.
 - Payouts are 50/30/20 points for 1st, 2nd and 3rd. A round may draw different payouts per table, so read `state.config.payouts`.

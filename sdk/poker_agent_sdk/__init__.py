@@ -14,6 +14,13 @@ from typing import Any, Optional
 class Action:
     kind: str
     amount: Optional[int] = None
+    cards: Optional[tuple] = None  # variant "keep-reveal-discard": (keep, reveal)
+
+    @staticmethod
+    def choose(keep, reveal) -> "Action":
+        """Keep-reveal-discard variant. keep/reveal are card strings ("As") or indices 0-2
+        into state.cards; the third card is discarded. Action("choose") = automatic choice."""
+        return Action("choose", None, (keep, reveal))
 
     @staticmethod
     def fold() -> "Action":

@@ -1,4 +1,7 @@
-"""Local sit-and-go simulator for reference no-limit hold'em (MOCK of the real kit's engine).
+"""Local sit-and-go simulator (MOCK of the real kit's engine).
+
+Variants: "keep-reveal-discard" (default: 3 cards, keep 1 private, reveal 1, discard 1)
+and "reference-holdem".
 
 Simplifications vs. a full rules engine (fine for practice):
 - a short all-in raise does not block later re-raises,
@@ -14,7 +17,7 @@ from poker_agent_sdk import Action, Config, Event, LegalAction, SeatInfo, State
 from .cards import DECK, best_hand
 
 DEFAULTS = dict(
-    variant="reference-holdem",
+    variant="keep-reveal-discard",  # or "reference-holdem"
     starting_stack=1500,
     blinds=((10, 20), (15, 30), (25, 50), (50, 100), (75, 150), (100, 200),
             (150, 300), (200, 400), (300, 600), (400, 800), (600, 1200), (1000, 2000)),
@@ -71,6 +74,9 @@ class Table:
         self.shown = [()] * self.n
         self.button = rng.randrange(self.n)
         self.hand_number = 0
+        self.krd = s["variant"] == "keep-reveal-discard"
+        self.revealed = {}
+        self.discarded = {}
 
     # ---------- helpers ----------
     def alive(self):
@@ -133,7 +139,10 @@ class Table:
             self.button = self.next_alive(self.button, alive)
         deck = list(DECK)
         self.rng.shuffle(deck)
-        self.hole = {i: (deck.pop(), deck.pop()) for i in alive}
+        ncards = 3 if self.krd else 2
+        self.hole = {i: tuple(deck.pop() for _ in range(ncards)) for i in alive}
+        self.revealed = {}
+        self.discarded = {}
         self.board = []
         self.in_hand = set(alive)
         self.folded = set()
@@ -150,6 +159,8 @@ class Table:
             bb = self.next_alive(sb, alive)
         self.post(sb, sb_amt)
         self.post(bb, bb_amt)
+        if self.krd:
+            self.choose_phase(alive, start=self.next_alive(bb, alive))
 
         first = self.next_alive(bb, alive)
         for street in range(4):
@@ -251,13 +262,57 @@ class Table:
             la.append(LegalAction("raise", mn, mx))
         return la
 
-    def decide(self, i, current, min_inc):
-        la = self.legal(i, current, min_inc)
-        fallback = ("check", None) if any(a.kind == "check" for a in la) else ("fold", None)
-        state = self.build_state(i, la, current)
+    # ---------- keep-reveal-discard ----------
+    def choose_phase(self, alive, start):
+        """Every live player picks keep/reveal/discard simultaneously (no one sees others'
+        choices until all have chosen); then reveals are public as `reveal` events."""
+        order = [start] + [self.next_alive(start, alive)]
+        while len(order) < len(alive):
+            order.append(self.next_alive(order[-1], alive))
+        current = max(self.bet)
+        picks = {}
+        for i in order:
+            la = [LegalAction("choose")]
+            state = self.build_state(i, la, current, phase="choose")
+            action = self.ask(i, state)
+            picks[i] = self.parse_choice(i, action)
+        for i in order:
+            keep, reveal, discard = picks[i]
+            self.hole[i] = (keep, reveal)
+            self.revealed[i] = reveal
+            self.discarded[i] = discard
+            self.shown[i] = (reveal,)
+        for i in order:
+            self.emit("reveal", seat=i, cards=(self.revealed[i],))
+
+    def parse_choice(self, i, action):
+        h = self.hole[i]
+        auto = (h[0], h[1], h[2])  # automatic choice: keep 1st, reveal 2nd, discard 3rd
+        if action is None:
+            return auto
+        st = self.players[i].stats
+        if getattr(action, "kind", None) != "choose":
+            st.fail("illegal", f"kind {getattr(action, 'kind', None)!r} not offered (['choose'])")
+            return auto
+        if action.cards is None:
+            return auto
+        try:
+            keep, reveal = action.cards
+            keep = h[keep] if isinstance(keep, int) else keep
+            reveal = h[reveal] if isinstance(reveal, int) else reveal
+            if keep not in h or reveal not in h or keep == reveal:
+                raise ValueError(f"{action.cards!r} not two distinct cards of {h}")
+        except Exception as e:  # noqa: BLE001
+            st.fail("illegal", f"choose: {e}")
+            return auto
+        discard = next(c for c in h if c not in (keep, reveal))
+        return (keep, reveal, discard)
+
+    def ask(self, i, state):
+        """Call the bot with timing/memory rules. Returns its Action, or None on failure."""
         player = self.players[i]
         st = player.stats
-        agent = self.rng.choice(player.copies)  # any copy may answer any table
+        agent = self.rng.choice(player.copies)
         t0 = time.perf_counter_ns()
         try:
             out = agent.act(state, self.memory[i])
@@ -267,29 +322,40 @@ class Table:
         ms = (time.perf_counter_ns() - t0) / 1e6
         st.times.append(ms)
         st.decisions += 1
-
         over = ms - self.s["decision_ms"] - DELIVERY_ALLOWANCE_MS
         if over > 0:
             self.bank[i] -= over
             if self.bank[i] < 0:
                 self.bank[i] = 0.0
                 st.fail("timeout", f"act took {ms:.2f} ms, bank exhausted")
-                return fallback  # memory kept, events re-delivered
+                return None
         if err:
             st.fail("exception", err)
-            return fallback
+            return None
         try:
             action, mem = out
             if not isinstance(mem, (bytes, bytearray)):
                 raise TypeError("memory must be bytes")
         except Exception as e:  # noqa: BLE001
             st.fail("bad_return", f"{type(e).__name__}: {e}")
-            return fallback
+            return None
         self.memory[i] = bytes(mem[: self.s["memory_bytes"]])
         self.seen[i] = len(self.events)
         if len(mem) > self.s["memory_bytes"]:
             st.notes.add("memory truncated")
+        return action
 
+    def decide(self, i, current, min_inc):
+        la = self.legal(i, current, min_inc)
+        fallback = ("check", None) if any(a.kind == "check" for a in la) else ("fold", None)
+        state = self.build_state(i, la, current)
+        action = self.ask(i, state)
+        if action is None:
+            return fallback
+        return self.validate(i, la, action, fallback)
+
+    def validate(self, i, la, action, fallback):
+        st = self.players[i].stats
         kind = getattr(action, "kind", None)
         legal = next((a for a in la if a.kind == kind), None)
         if legal is None:
@@ -310,7 +376,7 @@ class Table:
             return ("raise", amt)
         return (kind, None)
 
-    def build_state(self, i, la, current):
+    def build_state(self, i, la, current, phase="betting"):
         s = self.s
         alive = self.alive()
         lv = self.level()
@@ -336,12 +402,14 @@ class Table:
         return State(
             seat=i, cards=self.hole[i], board=tuple(self.board), pot=sum(self.contrib),
             to_call=min(current - self.bet[i], self.stacks[i]), legal_actions=la,
-            history=list(self.hand_events), phase="betting", seats=seats, button=self.button,
+            history=list(self.hand_events), phase=phase, seats=seats, button=self.button,
             blind_level=lv, blinds=tuple(s["blinds"][lv]),
             hands_until_next_level=s["hands_per_level"] - (self.hand_number - 1) % s["hands_per_level"],
             hand_number=self.hand_number, players_remaining=len(alive),
             bust_order=list(self.bust_order), events=self.events[self.seen[i]:], config=cfg,
             time_bank_ms=self.bank[i],
+            variant=({"revealed": dict(self.revealed), "my_reveal": self.revealed.get(i),
+                      "my_discard": self.discarded.get(i)} if self.krd else {}),
         )
 
     def showdown(self):

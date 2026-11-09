@@ -150,8 +150,8 @@ def play(folders, tables, seed, settings):
     from poker_engine import Table
     from poker_engine.table import SeatPlayer
 
-    if not 2 <= len(folders) <= 10:
-        sys.exit("play needs 2 to 10 folders")
+    if not 2 <= len(folders) <= 8:
+        sys.exit("play needs 2 to 8 folders (one per seat)")
     rng = random.Random(seed)
     stats = [Stats() for _ in folders]
     copies = [[load_agent_class(f)() for _ in range(2)] for f in folders]  # two copies per seat
@@ -201,6 +201,7 @@ def main():
     p.add_argument("--time-bank-ms", type=int, default=None)
     p.add_argument("--starting-stack", type=int, default=None)
     p.add_argument("--hand-cap", type=int, default=None)
+    p.add_argument("--variant", choices=["keep-reveal-discard", "reference-holdem"], default=None)
     k = sub.add_parser("pack")
     k.add_argument("dir")
     k.add_argument("out")
@@ -211,7 +212,7 @@ def main():
         sys.exit(pack(a.dir, a.out))
     settings = {key: v for key, v in dict(
         decision_ms=a.decision_ms, time_bank_ms=a.time_bank_ms,
-        starting_stack=a.starting_stack, hand_cap=a.hand_cap).items() if v is not None}
+        starting_stack=a.starting_stack, hand_cap=a.hand_cap, variant=a.variant).items() if v is not None}
     for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
         os.environ.setdefault(var, "1")
     sys.exit(play(a.folders, a.tables, a.seed, settings))
