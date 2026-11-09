@@ -177,3 +177,89 @@ Round-robin, 4,000 tables (check_or_fold at every table): v12 15.2, v17 14.9, v1
 7 copies of v12 against 1 check_or_fold, 2,000 tables: v12 13.7 per seat, check_or_fold 4.3 (it never finishes 1st or 2nd, 3rd 21% of the time). Tight bots eliminate the check/fold exploit.
 
 **Recommended starting point for a new variant:** copy v12's layered structure (tight + ICM + public-info checks), replace the variant-specific pieces, add the baselines and harness, and run the parameter search from §6.
+
+---
+
+## 10. Bot catalog (every version we built)
+
+All bots are in `pokerbot-practice/`. "Pts" is average points per table in the latest round-robin that included the bot. The 1st/2nd/3rd payout is 50/30/20.
+
+| Bot | Built from | What it adds | Best result | Verdict |
+|---|---|---|---|---|
+| `examples/check_or_fold` | — | Checks when free, otherwise folds | 18.3–21.7 pts. It never finishes 1st and busts at a median of hand 103. | **The benchmark to beat.** It exploits fields that bust each other. |
+| `examples/min_raiser`, `calling_station`, `random_bot` | — | Spewy baselines | 1.6–7 pts | Only good for smoke tests. They make survival look more valuable than it is. |
+| **v0** (was `bot/`) | — | Rule bot: preflop hand score, push/fold at 12 big blinds or less, made-hand postflop logic. Keeps the best 2 of 3 cards and reveals the weaker. | 9.0–14.0 pts | Strong early baseline, but loose. Busts 69–81% of the time. |
+| **v1** | — | Heads-up external-sampling MCCFR policy (`train/mccfr.py`, 15M iterations). Random reveal/discard. | 5.6–6.2 pts | Worst real bot. Busts in 86% of seats, half by hand 6. |
+| v2 | v1 | + river guaranteed-loss fold + ICM veto and late aggression | 7.4–10.8 | Better than v1, still weak. |
+| v3 | v0 | + river guaranteed-loss fold + ICM veto and late aggression | 10.2–15.0 | Small gain over v0. Fewer busts. |
+| v4 | v2 | Policy actions under 8% removed | 9.2–11.3 | +1 point over v2. |
+| v5 | v1 | Pot-fraction raise sizes (1/3, 2/3, 1, 1.5, 2.5 pot, all-in) | 6.2–6.3 | Undertrained, with 4.7M iterations for twice the infosets. Not worth it under time pressure. |
+| v6 | v3 | MDF floor (never fold more than 1−MDF) + bluff cap | 7.8–10.6 | Worse. Defending against a passive field pays off its value bets. |
+| v7 | v3 | Exact MDF (continue with exactly the top MDF of a self-calibrated range) | 9.5–12.7 | Worse than v3 in most runs. |
+| v8 | v0 | + `tight.py` (top 10% preflop, bet with top pair good kicker+, call with top pair+, stack-off guard) | 10.4–13.0 | +1.5 over v0. |
+| v9 | v3 | + `tight.py` | 10.5–13.8 | +2.4 over v3. |
+| **v10** | v4 | + `tight.py` | **14.8–18.9** | **The biggest jump** (+8 over v4). First bot to rival check_or_fold. |
+| v11 | v7 | + `tight.py` | 10.8–12.9 | Okay. |
+| **v12** | v10 | Tighter (top 6% preflop, bet with two pair+, call with top pair good kicker+, top-of-range filter at min(MDF, 30%)) + `lock.py` (bet about pot when no unseen card beats us) | **15.2–17.7** | **Best overall.** Beats check_or_fold head-to-head. As 7 copies against 1 check_or_fold: 13.7 vs 4.3. |
+| v13 | v9 | Same changes as v12 | 12.5–14.4 | Wins the most 1sts (20–22%) but busts 62–69%. |
+| v14 | v13 | Step schedule by players remaining (tightest at 4–5 left, loosest in the top 3) | 11.7–13.0 | Slightly worse than v13. |
+| v15 | v13 | Smooth schedule + doubled ICM margin on the bubble | 12.6–12.9 | About even with v13. |
+| v16 | v10 | Step schedule | 12.8–14.5 | Slightly worse than v10. |
+| v17 | v10 | Smooth schedule | 13.1–14.9 | About even with v10. |
+| v18 | v12 | Looseness multiplier per player count, **learned** by a cross-entropy search over simulation | see §9 | See §9. |
+
+**Best bots: v12 first, then v10.** Both come from the CFR line, but the tightness, ICM and lock layers do most of the work.
+
+---
+
+## 11. Log of the key runs (newest first)
+
+All runs are 8-seat sit-and-gos. "Out" means finishing 4th–8th.
+
+1. **v12 ×7 vs check_or_fold, 2,000 tables (gentle blinds):** v12 13.7 per seat (1st 14%, out 60%); check_or_fold 4.3 (3rd 21%, out 79%).
+2. **Round-robin, 4,000 tables, check_or_fold plus 7 random from the pool (seed 121):**
+   - v12 15.2, v17 14.9, v10 14.8, v16 14.5, v13 13.9, v14 13.0, check_or_fold 12.8, v15 12.6, v11 11.1, v9 10.5, v8 10.4, v7 9.7, v0 9.0.
+   - A few timeouts (1–2 per bot) came from Windows CPU-load spikes over 100 ms.
+3. **Top 8, 3,000 tables (seed 111):** v12 15.8 (1st 4%, out 44%), v10 15.7, check_or_fold 14.8 (out 34%), v13 12.5 (1st 20%), v11 10.8, v9 10.8, v7 10.5, v0 9.2.
+4. **Round-robin, 3,000 tables (seed 101), gentle blinds:** check_or_fold 18.3, v12 17.7, v10 15.9, v13 14.4, v7 12.0, v9 11.7, v11 11.4, v0 10.9, v8 10.6, v3 10.2, v4 10.0, v6 7.8, v2 7.4.
+5. **Top 8, 2,000 tables (seed 81), gentle blinds:** check_or_fold 21.7, v10 18.9, v11 11.0, v9 10.8, v8 10.4, v7 9.5, v3 8.9, v0 8.8.
+6. **Round-robin, 3,000 tables (seed 71), original steep blinds that went up to 1000/2000:** check_or_fold 20.6, v10 17.1, v9 13.8, v8 13.0, v11 12.9, v7 12.7, v0 11.5, v3 11.4, v4 9.2, v6 8.9, v2 8.1, v5 6.2.
+7. **All of v0–v6 plus check_or_fold, 2,000 tables (seed 41), after the module-isolation fix:** check_or_fold 26.7, v3 15.0, v0 13.6, v4 11.3, v2 10.8, v6 10.6, v5 6.3, v1 5.6.
+8. **v1 bust analysis, 2,000 tables, mixed field:**
+   - v1 busts in 86.5% of seats; the median bust hand is 6, and 78% happen at the first blind level.
+   - 70% of busts are preflop; in 71%, v1 shoved and got called.
+   - 28.5% of the busting actions had a policy probability under 10%.
+   - Fallback rate 1%.
+9. **v1's postflop play, 100 hands:**
+   - It bets half pot almost always and bluffs air 39% of the time.
+   - It folds air to a bet 24 of 26 times and calls with any piece 31 of 42.
+   - It lost 46 big blinds postflop.
+10. **v0 vs v1 early, 1,000 tables:** heads-up v0 41.4 vs v1 38.6. With 4 of each, v0 14.6 vs v1 10.4.
+11. **Example-bot field, original blinds:** check_or_fold took 2nd 98% of the time. The spewy bots busted at a median of hands 1–4.
+
+**How much to trust a difference:** about ±0.15 points between seeds on 2,000-table runs of the same field. Across different fields, rankings in the middle shift by 1–2 places. Trust gaps above about 1 point.
+
+---
+
+## 12. Key takeaways (checklist for the next variant)
+
+1. **Read the scoring first.** If only the top 3 places pay, survival dominates. Build `check_or_fold` on day zero and make it the bar to beat.
+2. **Start tight and loosen only when simulation proves it pays.** Preflop top 6–10%, value bets only, and a stack-off guard. This alone beat every clever strategy we tried.
+3. **Put ICM on every commitment that risks the stack.** Use equity tables built at import plus Malmuth-Harville over `config.payouts`.
+4. **Exploit what the variant makes public.** Prove losses (fold) and locks (bet pot) by enumerating the unseen cards. The checks are cheap and exact.
+5. **Use CFR only as a base policy, never alone.**
+   - Heads-up abstractions misplay 8-max.
+   - Prune actions under 8%.
+   - Train on point utility if you can.
+   - It needs much more compute than a 60-minute build window allows unless the abstraction is tiny.
+6. **Distrust theory that assumes balanced opponents** (MDF, GTO defense). Measure against the real field.
+7. **Tune constants by search, not by hand.** Hand-picked schedules (v14–v17) lost. Use the cross-entropy method with common random seeds, then validate on fresh seeds.
+8. **Engineering first:**
+   - legal-action helpers and `try/except` fallbacks;
+   - per-table memory only;
+   - p99 under 0.2 ms;
+   - self-contained bot folders;
+   - module isolation in the local harness;
+   - 0 failed decisions before every upload.
+9. **Use a parallel, time-boxed workflow.** One agent per bot version, a 10-minute cap, a single round-robin to decide, and a commit after each milestone.
+10. **The official kit's README, RULES and AGENTS override this playbook.** Re-check limits, payouts, blinds and the variant's new phases and actions before reusing any code here.
